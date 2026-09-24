@@ -14,6 +14,61 @@ Each run is a one-shot sync, designed to run as a Kubernetes `CronJob`:
 - **Empty sessions**: header-only `.wiglecsv` and 0-byte files are archived without uploading.
 - **Compression**: files are tar.gz'd before upload (WiGLE's limit is 180 MiB, and Kismet's sqlite logs compress well).
 
+## Architecture
+
+**Sync data flow.** The hourly CronJob pulls finished Kismet sessions off the
+Pi and pushes them to WiGLE. Numbers follow one run.
+
+```text
+  brick69 (Raspberry Pi)                       k3s cluster, namespace "wigle"
+ +--------------------------------+          +-----------------------------------+
+ | Kismet                         |          | CronJob wigle-sync     0 * * * *  |
+ |   | writes                     |  [1] TCP |                                   |
+ |   v                            |<---------| 1. probe :22 (away? exit in ~3s)  |
+ | /var/log/kismet/               |   probe  | 2. list sessions quiet > 5 min    |
+ |   Kismet-<ts>.kismet           |          |    (aged by the Pi's own clock)   |
+ |   Kismet-<ts>.kismet-journal   | [2] SFTP | 3. download, roll back journal,   |
+ |   Kismet-<ts>.wiglecsv         |<-------->|    tar.gz                         |
+ |   uploaded/  <-- [4] archive   |          | 4. upload, then archive on Pi     |
+ |                                |          |                                   |
+ | sshd: wigle-sync (SFTP only)   |          +-----------------+-----------------+
+ +--------------------------------+                            |
+                                                               | [3] POST /file/upload
+                                                               v
+                                             +-----------------------------------+
+                                             | wigle.net API                     |
+                                             |   upload queue -> processed       |
+                                             +-----------------------------------+
+```
+
+- **[1]** The Pi is usually out driving, so a bare TCP probe runs first and an
+  unreachable Pi is a clean exit, not a failure.
+- **[2]** A session is only ready once *all* its files have been quiet for 5
+  minutes by the Pi's clock. The Pi has no RTC, and a parked session's
+  `.wiglecsv` can sit idle at its header while the `.kismet` is still live.
+- **[3]** A failed upload leaves the file in place for the next run.
+- **[4]** Archiving is what stops a session from being uploaded twice.
+
+**Observability and the console.**
+
+```text
+ CronJob wigle-sync
+   |-- stdout JSON logs --> promtail -------> Loki --------+
+   |-- OTLP spans --------> otel-collector -> Tempo -------+--> Grafana "WiGLE Sync"
+   '-- push run metrics --> Pushgateway ----> Prometheus --+    (logs <-> traces via trace_id)
+                                              ^
+                      kube-state-metrics -----'  (CronJob next/last run, failed jobs)
+
+ browser --> Traefik Ingress (wigle.local) --> wigle-console (Flask)
+                                                 |-- PromQL --> Prometheus  run metrics, schedule
+                                                 |-- LogQL ---> Loki        run log, faults
+                                                 |-- HTTPS ---> wigle.net   rank + upload queue (cached)
+                                                 '-- TCP :22 -> brick69     is the Pi home right now?
+
+ SealedSecret --> Secret wigle-sync-secrets --+--> CronJob        WiGLE creds, SSH key, Pi host key
+                                              '--> wigle-console  WiGLE creds
+```
+
 ## Setup
 
 ```bash
