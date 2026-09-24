@@ -1,0 +1,18 @@
+services:
+  wigle-sync:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wigle-sync:0.1.1
+    env_file: .env
+    environment:
+      - POETRY_NO_INTERACTION=1
+      # Paths inside the container; the host files are mounted below.
+      - PI_SSH_KEY_PATH=/secrets/id_ed25519
+      - PI_KNOWN_HOSTS_PATH=/secrets/known_hosts
+    volumes:
+      - ${PI_SSH_KEY_HOST_PATH:-~/.ssh/wigle_sync_ed25519}:/secrets/id_ed25519:ro
+      - ./known_hosts:/secrets/known_hosts:ro
+    # One-shot: runs a single sync and exits. `docker compose run --rm wigle-sync --dry-run`
+    # to preview, `--check-auth` to test WiGLE creds. In k8s this becomes a CronJob.
+    restart: "no"

@@ -1,0 +1,94 @@
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: wigle-sync
+  namespace: wigle
+spec:
+  # Top of every hour. Most runs just find the Pi offline and exit in a few seconds.
+  schedule: "0 * * * *"
+  # A big first sync can outlast the hour; never run two against the Pi at once.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # A failed upload is already retried by next hour's run (the file stays on
+      # the Pi), so don't hammer WiGLE with in-job retries too.
+      backoffLimit: 0
+      activeDeadlineSeconds: 3300
+      template:
+        metadata:
+          labels:
+            app: wigle-sync
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: wigle-sync
+              image: whitepatrick/wigle-sync:0.1.1
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: WIGLE_API_NAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: wigle-sync-secrets
+                      key: WIGLE_API_NAME
+                - name: WIGLE_API_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: wigle-sync-secrets
+                      key: WIGLE_API_TOKEN
+                - name: WIGLE_DONATE
+                  value: "false"
+                - name: PI_HOST
+                  value: "192.168.1.208"
+                - name: PI_USER
+                  value: "wigle-sync"
+                - name: PI_SSH_KEY_PATH
+                  value: "/secrets/id_ed25519"
+                - name: PI_KNOWN_HOSTS_PATH
+                  value: "/secrets/known_hosts"
+                - name: PI_REMOTE_DIR
+                  value: "/var/log/kismet"
+                - name: PI_ARCHIVE_DIR
+                  value: "/var/log/kismet/uploaded"
+                - name: PI_PROBE_TIMEOUT
+                  value: "3"
+                - name: LOG_FORMAT
+                  value: "json"
+                - name: OTEL_EXPORTER_OTLP_ENDPOINT
+                  value: "http://otel-collector-opentelemetry-collector.monitoring.svc.cluster.local:4317"
+                - name: PUSHGATEWAY_URL
+                  value: "http://pushgateway-prometheus-pushgateway.monitoring.svc.cluster.local:9091"
+                # Downloads and tar.gz'ing happen here, not on the node's root disk
+                # (brick420's SD card is tight).
+                - name: TMPDIR
+                  value: "/work"
+              volumeMounts:
+                - name: secrets
+                  mountPath: /secrets
+                  readOnly: true
+                - name: work
+                  mountPath: /work
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 500m
+                  # requests builds the multipart body in memory; WiGLE caps uploads at 180 MiB.
+                  memory: 512Mi
+          volumes:
+            - name: secrets
+              secret:
+                secretName: wigle-sync-secrets
+                defaultMode: 0400
+                items:
+                  - key: id_ed25519
+                    path: id_ed25519
+                  - key: known_hosts
+                    path: known_hosts
+            - name: work
+              emptyDir:
+                sizeLimit: 2Gi
