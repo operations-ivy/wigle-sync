@@ -26,7 +26,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: wigle-sync
-              image: whitepatrick/wigle-sync:0.1.1
+              image: whitepatrick/wigle-sync:0.1.2
               imagePullPolicy: IfNotPresent
               env:
                 - name: WIGLE_API_NAME

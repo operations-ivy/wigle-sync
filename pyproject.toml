@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "wigle_sync"
-version = "0.1.1"
+version = "0.1.2"
 description = "Pull .kismet/.wiglecsv wardriving logs off a Raspberry Pi and upload them to wigle.net"
 authors = ["Patrick White <whitep@alumni.vcu.edu>"]
 
