@@ -108,7 +108,9 @@ def sync_file(pi: PiClient, wigle: WigleClient, remote_file: RemoteFile, setting
             "Uploaded to WiGLE",
             file=remote_file.name,
             bytes=upload_size,
-            transid=result.get("results", {}).get("transid"),
+            # WiGLE returns the transaction id(s) in `results`; log it whole rather than
+            # guess at the field shape.
+            wigle_results=result.get("results"),
         )
 
 
