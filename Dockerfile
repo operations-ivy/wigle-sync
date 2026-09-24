@@ -1,4 +1,4 @@
-# docker build -t whitepatrick/wigle-sync:0.1.1 . --no-cache
+# docker build -t whitepatrick/wigle-sync:0.1.2 . --no-cache
 FROM python:3.11-slim-bookworm
 
 ENV POETRY_VERSION=1.3.2
