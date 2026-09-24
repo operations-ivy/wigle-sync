@@ -1,4 +1,4 @@
-# docker build -t whitepatrick/wigle-sync:0.1.2 . --no-cache
+# docker buildx build --builder brick2000-arm64 --platform linux/arm64 -t whitepatrick/wigle-sync:0.1.2 --push .
 FROM python:3.11-slim-bookworm
 
 ENV POETRY_VERSION=1.3.2

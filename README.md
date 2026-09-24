@@ -129,8 +129,11 @@ its own panel.
 
 ```bash
 kubectl apply -f k8s_config/console/
-echo "<main-node-ip> wigle.local" | sudo tee -a /etc/hosts
 ```
+
+`wigle.local` is announced over mDNS by brick420 (`mdns-alias@wigle.service`,
+see `brick-k8s-config`'s README, "LAN names for ingresses (mDNS)"), so it opens
+from any device on the home WiFi, phones included, with no hosts-file entry.
 
 Locally: port-forward Prometheus (9090) and Loki (3100), then
 `docker compose up wigle-console` and open http://localhost:5000.
