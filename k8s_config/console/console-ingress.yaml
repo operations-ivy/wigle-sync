@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: wigle-console
+  namespace: wigle
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: wigle.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: wigle-console
+            port:
+              number: 80

@@ -16,3 +16,26 @@ services:
     # One-shot: runs a single sync and exits. `docker compose run --rm wigle-sync --dry-run`
     # to preview, `--check-auth` to test WiGLE creds. In k8s this becomes a CronJob.
     restart: "no"
+
+  wigle-console:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    image: wigle-console:0.1.0
+    env_file: .env
+    # Point these at port-forwards to reach the cluster's Prometheus/Loki from a laptop:
+    #   kubectl -n monitoring port-forward svc/kube-prometheus-stack-prometheus 9090
+    #   kubectl -n monitoring port-forward svc/loki 3100
+    environment:
+      - PROMETHEUS_URL=http://host.docker.internal:9090
+      - LOKI_URL=http://host.docker.internal:3100
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 30s
+      retries: 5
+      start_period: 30s
+      timeout: 30s

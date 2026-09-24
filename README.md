@@ -59,3 +59,23 @@ docker compose run --rm wigle-sync
 See `.env.template` for everything. In short: `WIGLE_API_NAME`/`WIGLE_API_TOKEN`
 come from wigle.net → Account → API Token, and `PI_*` describes how to reach the
 Pi and where its logs live.
+
+## Console (`http://wigle.local`)
+
+A read-only status page in the same style as chucks-wisdom's console
+(`console.py`, `stats.py`, `templates/console.html`, image built from
+`Dockerfile.web`). It shows next/last sync, what the last run uploaded, the
+Pi's live status, a 96h run log, faults, and your WiGLE rank plus each
+upload's processing state. `/api/status` serves the same data as JSON.
+
+It reads from Prometheus (Pushgateway + kube-state-metrics), Loki and the WiGLE
+API (cached 10 min). Each source is independent, so one being down only blanks
+its own panel.
+
+```bash
+kubectl apply -f k8s_config/console/
+echo "<main-node-ip> wigle.local" | sudo tee -a /etc/hosts
+```
+
+Locally: port-forward Prometheus (9090) and Loki (3100), then
+`docker compose up wigle-console` and open http://localhost:5000.
