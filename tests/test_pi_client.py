@@ -30,10 +30,10 @@ def test_selects_only_settled_capture_files_oldest_first():
         _entry("uploaded", age=600, mode=stat.S_IFDIR | 0o755),
     ]
 
-    ready = select_ready_files(entries, "/home/pi/kismet", (".kismet", ".wiglecsv"), 300, NOW)
+    ready = select_ready_files(entries, "/var/log/kismet", (".kismet", ".wiglecsv"), 300, NOW)
 
     assert [f.name for f in ready] == ["Kismet-1.wiglecsv", "Kismet-2.kismet"]
-    assert ready[1].path == "/home/pi/kismet/Kismet-2.kismet"
+    assert ready[1].path == "/var/log/kismet/Kismet-2.kismet"
 
 
 def test_pairs_kismet_db_with_its_journal_and_waits_on_journal_mtime():
