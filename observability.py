@@ -49,12 +49,12 @@ def init_logging() -> None:
     )
 
 
-def init_tracing() -> TracerProvider | None:
+def init_tracing(service_name: str = SERVICE_NAME) -> TracerProvider | None:
     """Ship spans to the in-cluster OTel collector (-> Tempo). No-op when the endpoint isn't set, e.g. locally."""
     endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
     if not endpoint:
         return None
-    provider = TracerProvider(resource=Resource.create({"service.name": SERVICE_NAME}))
+    provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
     provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, insecure=True)))
     trace.set_tracer_provider(provider)
     RequestsInstrumentor().instrument()

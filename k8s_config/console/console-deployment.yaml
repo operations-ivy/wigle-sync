@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wigle-console
+  namespace: wigle
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wigle-console
+  template:
+    metadata:
+      labels:
+        app: wigle-console
+    spec:
+      containers:
+      - name: wigle-console
+        image: whitepatrick/wigle-console:0.1.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 5000
+        env:
+        # Profile + processing queue come straight from WiGLE (cached 10 min).
+        - name: WIGLE_API_NAME
+          valueFrom:
+            secretKeyRef:
+              name: wigle-sync-secrets
+              key: WIGLE_API_NAME
+        - name: WIGLE_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: wigle-sync-secrets
+              key: WIGLE_API_TOKEN
+        # Live "is the Pi home" probe — a bare TCP connect, no SSH key needed here.
+        - name: PI_HOST
+          value: "192.168.1.208"
+        - name: PROMETHEUS_URL
+          value: "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090"
+        - name: LOKI_URL
+          value: "http://loki.monitoring.svc.cluster.local:3100"
+        - name: LOG_FORMAT
+          value: "json"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otel-collector-opentelemetry-collector.monitoring.svc.cluster.local:4317"
+        resources:
+          requests:
+            cpu: 50m
+            memory: 96Mi
+          limits:
+            cpu: 250m
+            memory: 192Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 10
