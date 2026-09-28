@@ -220,3 +220,6 @@ __marimo__/
 
 # Pi host key pin (see PI_KNOWN_HOSTS_PATH)
 known_hosts
+
+# Local running TODO list, kept out of the repo
+TODO.md

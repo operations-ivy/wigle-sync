@@ -237,6 +237,7 @@ footer code{ color:var(--text-dim); }
       <div class="stat cy"><div class="n" id="s-next">--:--</div><div class="l">Next sync</div><div class="sub" id="s-next-sub">&nbsp;</div></div>
       <div class="stat vi"><div class="n" id="s-last">—</div><div class="l">Last sync</div><div class="sub" id="s-last-sub">&nbsp;</div></div>
       <div class="stat mag"><div class="n" id="s-uploaded">—</div><div class="l">Uploaded last sync</div><div class="sub" id="s-uploaded-sub">&nbsp;</div></div>
+      <div class="stat mag"><div class="n" id="s-total">—</div><div class="l">Uploaded all time</div><div class="sub">since wigle-sync launched</div></div>
       <div class="stat" id="s-failed-box"><div class="n" id="s-failed">—</div><div class="l">Errors last sync</div><div class="sub" id="s-failed-sub">&nbsp;</div></div>
       <div class="stat ac"><div class="n" id="s-clean">—</div><div class="l">Last clean sync</div><div class="sub" id="s-clean-sub">&nbsp;</div></div>
       <div class="stat am"><div class="n" id="s-seen">—</div><div class="l">Pi last seen</div><div class="sub" id="s-seen-sub">&nbsp;</div></div>
@@ -359,6 +360,7 @@ footer code{ color:var(--text-dim); }
       $("s-last-sub").textContent = stamp(lr.last_run_timestamp_seconds) + (lr.pi_online ? " · pi home" : " · pi away");
       $("s-uploaded").textContent = num(lr.files_uploaded);
       $("s-uploaded-sub").textContent = bytes(lr.bytes_uploaded) + " · " + num(lr.files_archived_empty) + " empty";
+      $("s-total").textContent = num(lr.files_uploaded_since_launch);
       $("s-failed").textContent = num(lr.files_failed);
       $("s-failed-box").classList.toggle("bad", lr.files_failed > 0);
       $("s-failed-box").classList.toggle("ac", !(lr.files_failed > 0));

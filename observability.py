@@ -4,6 +4,7 @@ import logging
 import os
 from dataclasses import dataclass
 
+import requests
 import structlog
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
@@ -14,8 +15,12 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from prometheus_client import CollectorRegistry
 from prometheus_client import Gauge
 from prometheus_client import pushadd_to_gateway
+from prometheus_client.parser import text_string_to_metric_families
 
 SERVICE_NAME = "wigle-sync"
+# Running total across every run. The Pushgateway keeps it on a persistent
+# volume, so each run that uploads reads it back and pushes it increased.
+UPLOADED_TOTAL = "wigle_sync_files_uploaded_since_launch"
 
 log = structlog.get_logger()
 
@@ -76,6 +81,18 @@ class RunStats:
         return self.failed == 0
 
 
+def pushed_uploaded_total(gateway: str) -> float:
+    """The lifetime upload total the Pushgateway holds now; 0 before it was ever pushed."""
+    url = gateway if "://" in gateway else f"http://{gateway}"
+    resp = requests.get(f"{url.rstrip('/')}/metrics", timeout=10)
+    resp.raise_for_status()
+    for family in text_string_to_metric_families(resp.text):
+        for sample in family.samples:
+            if sample.name == UPLOADED_TOTAL and sample.labels.get("job") == SERVICE_NAME:
+                return sample.value
+    return 0.0
+
+
 def push_metrics(stats: RunStats, finished_at: float) -> None:
     """Push this run's results to the Pushgateway, which Prometheus scrapes.
 
@@ -105,6 +122,14 @@ def push_metrics(stats: RunStats, finished_at: float) -> None:
         gauge("last_pi_online_timestamp_seconds", "When the Pi was last reachable", finished_at)
     if stats.pi_online and stats.succeeded:
         gauge("last_success_timestamp_seconds", "When a sync with the Pi last completed cleanly", finished_at)
+    if stats.uploaded:
+        try:
+            total = pushed_uploaded_total(gateway) + stats.uploaded
+        except Exception:
+            # Pushing a total without the old one would reset it; leave it for a human instead.
+            log.warning("Failed to read the upload total, not updating it", uploaded=stats.uploaded, exc_info=True)
+        else:
+            gauge("files_uploaded_since_launch", "Files uploaded to WiGLE across every run", total)
 
     try:
         pushadd_to_gateway(gateway, job=SERVICE_NAME, registry=registry, timeout=10)
