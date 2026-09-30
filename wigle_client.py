@@ -15,6 +15,10 @@ class WigleUploadError(Exception):
     pass
 
 
+class WigleUnreachable(Exception):
+    """WiGLE couldn't be reached at all (no internet, DNS down), as opposed to WiGLE refusing a file."""
+
+
 class WigleClient:
     def __init__(self, api_name: str, api_token: str, donate: bool = False) -> None:
         self.donate = donate
@@ -34,13 +38,16 @@ class WigleClient:
 
         data = {"donate": "on"} if self.donate else {}
         with path.open("rb") as fh:
-            # Generous read timeout: WiGLE doesn't respond until it has the whole file.
-            resp = self.session.post(
-                f"{WIGLE_API_URL}/file/upload",
-                files={"file": (path.name, fh, "application/octet-stream")},
-                data=data,
-                timeout=(10, 600),
-            )
+            try:
+                # Generous read timeout: WiGLE doesn't respond until it has the whole file.
+                resp = self.session.post(
+                    f"{WIGLE_API_URL}/file/upload",
+                    files={"file": (path.name, fh, "application/octet-stream")},
+                    data=data,
+                    timeout=(10, 600),
+                )
+            except requests.ConnectionError as e:
+                raise WigleUnreachable(str(e)) from e
 
         try:
             body = resp.json()

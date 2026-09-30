@@ -73,6 +73,8 @@ class RunStats:
     uploaded: int = 0
     archived_empty: int = 0
     failed: int = 0
+    # Left on the Pi because WiGLE was unreachable (e.g. the internet was down). Not a failure.
+    deferred: int = 0
     bytes_uploaded: int = 0
     duration_seconds: float = 0.0
 
@@ -117,10 +119,15 @@ def push_metrics(stats: RunStats, finished_at: float) -> None:
     gauge("files_uploaded", "Files uploaded to WiGLE in the last run", stats.uploaded)
     gauge("files_archived_empty", "Empty files archived without upload in the last run", stats.archived_empty)
     gauge("files_failed", "Files that failed to sync in the last run", stats.failed)
+    gauge("files_deferred", "Files left on the Pi in the last run because WiGLE was unreachable", stats.deferred)
     gauge("bytes_uploaded", "Bytes (post-compression) uploaded to WiGLE in the last run", stats.bytes_uploaded)
     if stats.pi_online:
         gauge("last_pi_online_timestamp_seconds", "When the Pi was last reachable", finished_at)
-    if stats.pi_online and stats.succeeded:
+        # The last run that actually synced with the Pi; runs while it's away don't replace these.
+        gauge("last_sync_files_uploaded", "Files uploaded by the last run that found the Pi", stats.uploaded)
+        gauge("last_sync_files_failed", "Files that failed in the last run that found the Pi", stats.failed)
+        gauge("last_sync_files_deferred", "Files deferred in the last run that found the Pi", stats.deferred)
+    if stats.pi_online and stats.succeeded and not stats.deferred:
         gauge("last_success_timestamp_seconds", "When a sync with the Pi last completed cleanly", finished_at)
     if stats.uploaded:
         try:

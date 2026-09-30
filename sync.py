@@ -22,6 +22,7 @@ from observability import RunStats
 from pi_client import PiClient
 from pi_client import RemoteFile
 from wigle_client import WigleClient
+from wigle_client import WigleUnreachable
 
 log = structlog.get_logger()
 tracer = trace.get_tracer(__name__)
@@ -142,12 +143,20 @@ def run(settings: Settings, stats: RunStats, dry_run: bool = False) -> None:
         stats.files_found = len(ready)
         log.info("Found files ready to upload", count=len(ready), files=[f.name for f in ready])
 
-        for remote_file in ready:
+        for i, remote_file in enumerate(ready):
             if dry_run:
                 log.info("Dry run, would upload", file=remote_file.name, size=remote_file.size)
                 continue
             try:
                 sync_file(pi, wigle, remote_file, settings, stats)
+            except WigleUnreachable as e:
+                # The home internet is down, not something wigle-sync got wrong. Every
+                # file is still on the Pi, so the next run picks them up; stop trying now.
+                stats.deferred = len(ready) - i
+                log.info(
+                    "WiGLE unreachable, leaving files on the Pi for next run", deferred=stats.deferred, error=str(e)
+                )
+                break
             except Exception:
                 stats.failed += 1
                 log.exception("Failed to sync file, leaving it on the Pi for next run", file=remote_file.name)

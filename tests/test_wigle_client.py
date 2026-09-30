@@ -3,8 +3,10 @@ from __future__ import annotations
 from unittest import mock
 
 import pytest
+import requests
 
 from wigle_client import WigleClient
+from wigle_client import WigleUnreachable
 from wigle_client import WigleUploadError
 
 
@@ -38,4 +40,15 @@ def test_upload_raises_when_wigle_reports_failure(tmp_path):
     failed = _response(200, {"success": False, "message": "bad file"})
     with mock.patch.object(client.session, "post", return_value=failed):
         with pytest.raises(WigleUploadError, match="bad file"):
+            client.upload(path)
+
+
+def test_upload_raises_unreachable_when_wigle_cannot_be_reached(tmp_path):
+    path = tmp_path / "Kismet-1.kismet"
+    path.write_bytes(b"sqlite")
+    client = WigleClient("AIDname", "token")
+
+    offline = requests.ConnectionError("Failed to resolve 'api.wigle.net'")
+    with mock.patch.object(client.session, "post", side_effect=offline):
+        with pytest.raises(WigleUnreachable):
             client.upload(path)

@@ -46,7 +46,10 @@ Pi and pushes them to WiGLE. Numbers follow one run.
 - **[2]** A session is only ready once *all* its files have been quiet for 5
   minutes by the Pi's clock. The Pi has no RTC, and a parked session's
   `.wiglecsv` can sit idle at its header while the `.kismet` is still live.
-- **[3]** A failed upload leaves the file in place for the next run.
+- **[3]** A failed upload leaves the file in place for the next run. If WiGLE
+  can't be reached at all (the home internet is down), the run stops trying,
+  counts the remaining files as *deferred* rather than failed, and exits
+  cleanly: the internet dropping is not a wigle-sync fault.
 - **[4]** Archiving is what stops a session from being uploaded twice.
 
 **Observability and the console.**
@@ -61,7 +64,7 @@ Pi and pushes them to WiGLE. Numbers follow one run.
 
  browser --> Traefik Ingress (wigle.local) --> wigle-console (Flask)
                                                  |-- PromQL --> Prometheus  run metrics, schedule
-                                                 |-- LogQL ---> Loki        run log, faults
+                                                 |-- LogQL ---> Loki        96h runs, faults
                                                  |-- HTTPS ---> wigle.net   rank + upload queue (cached)
                                                  '-- TCP :22 -> brick69     is the Pi home right now?
 
@@ -119,9 +122,11 @@ Pi and where its logs live.
 
 A read-only status page in the same style as chucks-wisdom's console
 (`console.py`, `stats.py`, `templates/console.html`, image built from
-`Dockerfile.web`). It shows next/last sync, what the last run uploaded, the
-Pi's live status, a 96h run log, faults, and your WiGLE rank plus each
-upload's processing state. `/api/status` serves the same data as JSON.
+`Dockerfile.web`). One narrow column: next sync, the last sync with the Pi
+(OK, failed, or waiting for the internet) and what it uploaded, the all-time
+total, a 96h strip of hourly runs, and your WiGLE rank plus the latest
+uploads' processing state. Faults from the sync job appear only when there
+are any. `/api/status` serves the same data as JSON.
 
 It reads from Prometheus (Pushgateway + kube-state-metrics), Loki and the WiGLE
 API (cached 10 min). Each source is independent, so one being down only blanks
