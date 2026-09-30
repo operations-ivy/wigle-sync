@@ -22,6 +22,9 @@ PROMETHEUS_URL = os.environ.get(
 LOKI_URL = os.environ.get("LOKI_URL", "http://loki.monitoring.svc.cluster.local:3100")
 NAMESPACE = os.environ.get("SYNC_NAMESPACE", "wigle")
 CRONJOB = os.environ.get("SYNC_CRONJOB", "wigle-sync")
+# The sync job's container. Faults come only from it: the console's own hiccups
+# (a slow Loki, say) are not worth showing on the console.
+SYNC_CONTAINER = os.environ.get("SYNC_CONTAINER", "wigle-sync")
 # Loki (and so run history / errors) keeps 4 days.
 HISTORY_WINDOW_SECONDS = 4 * 24 * 3600
 
@@ -129,12 +132,23 @@ def pi() -> dict[str, Any]:
 
 def history() -> dict[str, Any]:
     runs = _loki_lines(f'{{namespace="{NAMESPACE}"}} |= "Sync complete"', limit=120)
-    keys = ("pi_online", "files_found", "uploaded", "archived_empty", "failed", "bytes_uploaded", "duration_seconds")
+    keys = (
+        "pi_online",
+        "files_found",
+        "uploaded",
+        "archived_empty",
+        "failed",
+        "deferred",
+        "bytes_uploaded",
+        "duration_seconds",
+    )
     return {"runs": [{"at": r["_ts"], **{k: r.get(k) for k in keys}} for r in runs]}
 
 
 def errors() -> dict[str, Any]:
-    lines = _loki_lines(f'{{namespace="{NAMESPACE}"}} | json | level=~"error|warning"', limit=30)
+    lines = _loki_lines(
+        f'{{namespace="{NAMESPACE}",container="{SYNC_CONTAINER}"}} | json | level=~"error|warning"', limit=30
+    )
     out = []
     for e in lines:
         exc = (e.get("exception") or "").strip().splitlines()
