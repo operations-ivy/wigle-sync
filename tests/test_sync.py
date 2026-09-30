@@ -3,10 +3,14 @@ from __future__ import annotations
 import shutil
 import socket
 import sqlite3
+from unittest import mock
 
+from observability import RunStats
 from sync import has_observations
 from sync import pi_is_online
 from sync import recover_kismet_db
+from sync import run
+from wigle_client import WigleUnreachable
 
 
 def test_has_observations(tmp_path):
@@ -54,3 +58,21 @@ def test_pi_is_online():
         port = server.getsockname()[1]
         assert pi_is_online("127.0.0.1", port, timeout=1)
     assert not pi_is_online("127.0.0.1", port, timeout=1)
+
+
+def test_wigle_unreachable_defers_the_rest_of_the_run():
+    files = [mock.Mock(name=f"f{i}") for i in range(3)]
+    stats = RunStats()
+    with (
+        mock.patch("sync.pi_is_online", return_value=True),
+        mock.patch("sync.WigleClient"),
+        mock.patch("sync.PiClient") as pi_client,
+        mock.patch("sync.sync_file", side_effect=[None, WigleUnreachable("no internet"), None]) as sync_file,
+    ):
+        pi_client.return_value.list_ready_files.return_value = files
+        run(mock.Mock(), stats)
+
+    assert sync_file.call_count == 2  # stopped at the first unreachable upload
+    assert stats.deferred == 2
+    assert stats.failed == 0
+    assert stats.succeeded

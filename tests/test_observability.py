@@ -3,8 +3,8 @@ from __future__ import annotations
 from unittest import mock
 
 from observability import push_metrics
-from observability import UPLOADED_TOTAL
 from observability import RunStats
+from observability import UPLOADED_TOTAL
 
 
 GATEWAY_WITH_TOTAL = """# TYPE wigle_sync_files_uploaded_since_launch gauge
@@ -64,3 +64,20 @@ def test_upload_total_not_reset_when_gateway_unreadable():
     pushed = _pushed(RunStats(pi_online=True, uploaded=2), gateway_error=OSError("down"))
     assert UPLOADED_TOTAL not in pushed
     assert pushed["wigle_sync_files_uploaded"] == 2
+
+
+def test_deferred_run_is_not_a_failure_or_a_success():
+    pushed = _pushed(RunStats(pi_online=True, deferred=4))
+    assert pushed["wigle_sync_files_failed"] == 0
+    assert pushed["wigle_sync_files_deferred"] == 4
+    assert pushed["wigle_sync_last_sync_files_deferred"] == 4
+    assert "wigle_sync_last_success_timestamp_seconds" not in pushed
+
+
+def test_last_sync_gauges_only_pushed_when_the_pi_was_home():
+    home = _pushed(RunStats(pi_online=True, uploaded=3, failed=1))
+    assert home["wigle_sync_last_sync_files_uploaded"] == 3
+    assert home["wigle_sync_last_sync_files_failed"] == 1
+
+    away = _pushed(RunStats(pi_online=False))
+    assert not any(k.startswith("wigle_sync_last_sync_") for k in away)
