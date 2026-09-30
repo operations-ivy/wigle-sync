@@ -122,11 +122,12 @@ Pi and where its logs live.
 
 A read-only status page in the same style as chucks-wisdom's console
 (`console.py`, `stats.py`, `templates/console.html`, image built from
-`Dockerfile.web`). One narrow column: next sync, the last sync with the Pi
+`Dockerfile.web`). Four tiles across the top: next sync, the last sync with the Pi
 (OK, failed, or waiting for the internet) and what it uploaded, the all-time
-total, a 96h strip of hourly runs, and your WiGLE rank plus the latest
-uploads' processing state. Faults from the sync job appear only when there
-are any. `/api/status` serves the same data as JSON.
+total. Below them, a 96h strip of hourly runs on the left and your WiGLE rank
+plus the latest uploads' processing state on the right (one column on a
+phone). Faults from the sync job appear only when there are any, each distinct
+one once with a count. `/api/status` serves the same data as JSON.
 
 It reads from Prometheus (Pushgateway + kube-state-metrics), Loki and the WiGLE
 API (cached 10 min). Each source is independent, so one being down only blanks
