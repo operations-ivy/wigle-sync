@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from unittest import mock
 
 import stats
@@ -31,4 +32,34 @@ def test_cache_reuses_values_within_ttl():
     fn = mock.Mock(side_effect=[1, 2])
     assert cache.get("k", 60, fn) == 1
     assert cache.get("k", 60, fn) == 1
-    assert cache.get("k", 0, fn) == 2
+    fn.assert_called_once()
+
+
+def _join_refreshes():
+    for t in threading.enumerate():
+        if t is not threading.current_thread() and t.daemon:
+            t.join(timeout=5)
+
+
+def test_stale_value_is_served_while_refreshing_in_background():
+    cache = stats._Cache()
+    release = threading.Event()
+
+    def slow():
+        release.wait(5)
+        return 2
+
+    assert cache.get("k", 0, lambda: 1) == 1
+    assert cache.get("k", 0, slow) == 1  # stale, returned without waiting
+    assert cache.get("k", 0, slow) == 1  # one refresh at a time
+    release.set()
+    _join_refreshes()
+    assert cache.get("k", 60, slow) == 2
+
+
+def test_failed_refresh_keeps_the_stale_value():
+    cache = stats._Cache()
+    assert cache.get("k", 0, lambda: 1) == 1
+    assert cache.get("k", 0, mock.Mock(side_effect=OSError("loki down"))) == 1
+    _join_refreshes()
+    assert cache.get("k", 60, lambda: 3) == 1

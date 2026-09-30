@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 from flask import Flask
 from flask import jsonify
 from flask import render_template
@@ -13,6 +15,9 @@ init_logging()
 init_tracing("wigle-console")
 
 app = Flask(__name__)
+# Build the first status in the background at start-up, so even the first
+# visitor after a deploy gets a cached answer instead of waiting on Loki.
+threading.Thread(target=stats.collect, daemon=True).start()
 FlaskInstrumentor().instrument_app(app, excluded_urls="health")
 
 

@@ -36,21 +36,44 @@ STATUS_TTL_SECONDS = 15
 
 
 class _Cache:
-    """Tiny thread-safe TTL cache so several open consoles don't multiply upstream calls."""
+    """Thread-safe TTL cache with stale-while-revalidate.
+
+    Past its TTL an entry is still returned at once, while one background thread
+    per key refreshes it, so a viewer never waits on a slow upstream (a cold
+    status build is ~10s, mostly Loki's 96h queries). Only a key's very first
+    request, with nothing cached yet, waits for the value.
+    """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._entries: dict[str, tuple[float, Any]] = {}
+        self._refreshing: set[str] = set()
 
     def get(self, key: str, ttl: float, fn: Callable[[], Any]) -> Any:
         with self._lock:
             hit = self._entries.get(key)
-            if hit and time.time() - hit[0] < ttl:
+            if hit:
+                if time.time() - hit[0] >= ttl and key not in self._refreshing:
+                    self._refreshing.add(key)
+                    threading.Thread(target=self._refresh, args=(key, fn), daemon=True).start()
                 return hit[1]
         value = fn()
         with self._lock:
             self._entries[key] = (time.time(), value)
         return value
+
+    def _refresh(self, key: str, fn: Callable[[], Any]) -> None:
+        try:
+            value = fn()
+        except Exception as e:
+            # Keep serving the stale value; the next request past the TTL tries again.
+            log.warning("Cache refresh failed", key=key, error=str(e))
+        else:
+            with self._lock:
+                self._entries[key] = (time.time(), value)
+        finally:
+            with self._lock:
+                self._refreshing.discard(key)
 
 
 _cache = _Cache()
@@ -86,7 +109,9 @@ def _loki_lines(query: str, limit: int) -> list[dict[str, Any]]:
             "end": int(now * 1e9),
             "direction": "backward",
         },
-        timeout=5,
+        # Refreshes run in the background (see _Cache), so a slow 96h query costs
+        # no one a wait; 5s used to cut it off and blank the panel.
+        timeout=20,
     )
     resp.raise_for_status()
     lines = []
