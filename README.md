@@ -131,7 +131,11 @@ one once with a count. `/api/status` serves the same data as JSON.
 
 It reads from Prometheus (Pushgateway + kube-state-metrics), Loki and the WiGLE
 API (cached 10 min). Each source is independent, so one being down only blanks
-its own panel.
+its own panel. Answers come from a stale-while-revalidate cache: past its
+15s TTL the last status is served at once while a background thread rebuilds
+it, because a cold build takes ~10s (mostly Loki's 96h queries). The console
+builds the first status at start-up, so only a request in its first seconds
+waits.
 
 ```bash
 kubectl apply -f k8s_config/console/

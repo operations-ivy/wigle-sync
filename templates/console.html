@@ -425,6 +425,9 @@ footer{ font-family:var(--font-mono); font-size:11px; color:var(--text-faint); t
     }).then(function(d){
       state.data = d;
       render();
+      // The server answers from its cache at once and refreshes behind it; if this
+      // answer is old (nobody had the page open), ask again shortly for the new one.
+      if (Date.now() / 1000 - d.generated_at > 60) setTimeout(load, 5000);
     }).catch(function(err){
       link("link-cron", "console", '<b class="warn">' + esc(err.message) + '</b>');
     });
