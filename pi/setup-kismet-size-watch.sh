@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs the Kismet log size watcher (a oneshot service run every minute by a timer).
+# Installs the Kismet log size watcher (a oneshot service run every 5 minutes by a timer).
 # Idempotent. Copy pi/ to the Pi and run it there as root:
 #
 #   scp pi/kismet-size-watch.* pi/setup-kismet-size-watch.sh zaphod@<pi>:/tmp/
