@@ -91,6 +91,17 @@ ssh zaphod@192.168.1.208 "sudo bash -s -- '$(cat ~/.ssh/wigle_sync_ed25519.pub)'
 ssh-keyscan -t ed25519 192.168.1.208 > known_hosts   # pins the Pi's host key
 ```
 
+WiGLE rejects uploads over 180 MiB, and Kismet can't rotate `.kismet` logs by
+size (only pcapng, via `pcapng_log_max_mb`). `kismet-size-watch.timer` checks the
+log Kismet has open every minute and restarts Kismet once it passes 150 MiB, which
+starts a new log. Change the cap with `KISMET_MAX_MB` in
+`pi/kismet-size-watch.service`. To install, or reinstall after a change:
+
+```bash
+scp pi/kismet-size-watch.* pi/setup-kismet-size-watch.sh zaphod@192.168.1.208:/tmp/
+ssh zaphod@192.168.1.208 'sudo bash /tmp/setup-kismet-size-watch.sh'
+```
+
 ## Running
 
 ```bash
