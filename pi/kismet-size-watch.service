@@ -1,0 +1,10 @@
+[Unit]
+Description=Restart Kismet when its log passes the size cap
+After=kismet.service
+
+[Service]
+Type=oneshot
+# MiB of raw .kismet log per session. Raw size, so the tar.gz wigle-sync uploads
+# lands well under WiGLE's 180 MiB limit.
+Environment=KISMET_MAX_MB=150
+ExecStart=/usr/local/sbin/kismet-size-watch

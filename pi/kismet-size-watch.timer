@@ -1,0 +1,10 @@
+[Unit]
+Description=Check Kismet's log size every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
