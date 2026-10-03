@@ -6,19 +6,8 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-  # Served through brick9000's proxy (brick-cicd-config). The .local name
-  # goes once nothing uses it.
+  # Served through brick9000's proxy (brick-cicd-config).
   - host: wigle.brick.nozdormu.cloud
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: wigle-console
-            port:
-              number: 80
-  - host: wigle.local
     http:
       paths:
       - path: /
