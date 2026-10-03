@@ -506,7 +506,7 @@ data:
                 "type": "loki",
                 "uid": "loki"
               },
-              "expr": "{namespace=\"wigle\"} | json | line_format \"{{.level}} {{.event}}\""
+              "expr": "{namespace=\"wigle\", container=\"wigle-sync\"} | json | line_format \"{{.level}} {{.event}}\""
             }
           ],
           "options": {
