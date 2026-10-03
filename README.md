@@ -62,7 +62,7 @@ Pi and pushes them to WiGLE. Numbers follow one run.
                                               ^
                       kube-state-metrics -----'  (CronJob next/last run, failed jobs)
 
- browser --> Traefik Ingress (wigle.local) --> wigle-console (Flask)
+ browser --> Traefik Ingress (wigle.brick...) --> wigle-console (Flask)
                                                  |-- PromQL --> Prometheus  run metrics, schedule
                                                  |-- LogQL ---> Loki        96h runs, faults
                                                  |-- HTTPS ---> wigle.net   rank + upload queue (cached)
@@ -129,7 +129,7 @@ See `.env.template` for everything. In short: `WIGLE_API_NAME`/`WIGLE_API_TOKEN`
 come from wigle.net → Account → API Token, and `PI_*` describes how to reach the
 Pi and where its logs live.
 
-## Console (`http://wigle.local`)
+## Console (`https://wigle.brick.nozdormu.cloud`)
 
 A read-only status page in the same style as chucks-wisdom's console
 (`console.py`, `stats.py`, `templates/console.html`, image built from
@@ -152,9 +152,10 @@ waits.
 kubectl apply -f k8s_config/console/
 ```
 
-`wigle.local` is announced over mDNS by brick420 (`mdns-alias@wigle.service`,
-see `brick-k8s-config`'s README, "LAN names for ingresses (mDNS)"), so it opens
-from any device on the home WiFi, phones included, with no hosts-file entry.
+`wigle.brick.nozdormu.cloud` is served through brick9000's proxy, over HTTPS
+(see `brick-k8s-config`'s README, "LAN names for ingresses"), so it opens from
+any device on the home WiFi, phones included, with no setup. The old
+`http://wigle.local` still works until it's retired.
 
 Locally: port-forward Prometheus (9090) and Loki (3100), then
 `docker compose up wigle-console` and open http://localhost:5000.
