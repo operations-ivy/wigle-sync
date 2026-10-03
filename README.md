@@ -154,8 +154,7 @@ kubectl apply -f k8s_config/console/
 
 `wigle.brick.nozdormu.cloud` is served through brick9000's proxy, over HTTPS
 (see `brick-k8s-config`'s README, "LAN names for ingresses"), so it opens from
-any device on the home WiFi, phones included, with no setup. The old
-`http://wigle.local` still works until it's retired.
+any device on the home WiFi, phones included, with no setup.
 
 Locally: port-forward Prometheus (9090) and Loki (3100), then
 `docker compose up wigle-console` and open http://localhost:5000.
