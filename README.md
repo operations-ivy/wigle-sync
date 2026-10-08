@@ -81,9 +81,43 @@ cp .env.template .env   # then fill in
 ### Pi side (one time)
 
 The Pi is `brick69` at 192.168.1.208 (static DHCP lease); Kismet logs to
-`/var/log/kismet`. The app connects as a dedicated `wigle-sync` user that can
-only use SFTP, and whose only access is an ACL on that log dir.
-`pi/setup-pi-user.sh` sets this up and is safe to re-run:
+`/var/log/kismet`. It has three radios, named by udev `.link` files that match
+the USB chip rather than a MAC, so swapping a dongle keeps its name:
+
+| Name | Radio | Job |
+| --- | --- | --- |
+| `wlan_host` | onboard (`brcmfmac`) | Joins home wifi; wigle-sync reaches the Pi through it |
+| `wlan_mon0` | RTL8821CU (`0bda:c811`) | Kismet's capture source |
+| `wlan_ap` | RTL8188EUS (`0bda:8179`) | hostapd AP, so a phone can open Kismet's UI at `http://192.168.50.1:2501` |
+
+GPS is a u-blox 7 on USB, read through gpsd. Once home wifi has been up for 15
+minutes, a NetworkManager dispatcher script stops Kismet, and deletes the session
+if the Pi never left home (a boot in the driveway shouldn't upload the home
+network).
+
+`pi/bootstrap.sh` builds all of this on a fresh Raspberry Pi OS (or Kali) install
+and is safe to re-run. Kismet comes from Kismet's own apt repo on Raspberry Pi OS.
+The SSIDs and the AP passphrase live only on the Pi, in `/etc/default/kismet-pi`
+(start from `pi/kismet-pi.env.example`):
+
+```bash
+scp -r pi zaphod@192.168.1.208:/tmp/wigle-pi
+ssh zaphod@192.168.1.208 'sudo install -m 600 /tmp/wigle-pi/kismet-pi.env.example /etc/default/kismet-pi'
+ssh -t zaphod@192.168.1.208 'sudoedit /etc/default/kismet-pi'
+ssh zaphod@192.168.1.208 'sudo bash /tmp/wigle-pi/bootstrap.sh'
+```
+
+It ends with checks (radio names, monitor and AP mode, hostapd, gpsd) and exits 1
+if any fail. If the RTL8188EUS can't do AP mode on the in-kernel driver, build
+[aircrack-ng/rtl8188eus](https://github.com/aircrack-ng/rtl8188eus) with DKMS.
+
+When replacing the Pi, copy `/etc/ssh/ssh_host_*` from the old one to keep the
+host key pinned in `known_hosts` below, and `~/.kismet/kismet_httpd.conf` to keep
+the Kismet UI login.
+
+The app connects as a dedicated `wigle-sync` user that can only use SFTP, and
+whose only access is an ACL on that log dir. `pi/setup-pi-user.sh` sets this up
+(bootstrap runs it when `WIGLE_SYNC_PUBKEY` is set) and is safe to re-run:
 
 ```bash
 ssh-keygen -t ed25519 -f ~/.ssh/wigle_sync_ed25519 -N "" -C wigle-sync

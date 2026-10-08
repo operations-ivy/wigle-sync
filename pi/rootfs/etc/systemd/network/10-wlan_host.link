@@ -1,0 +1,7 @@
+# Onboard radio: joins home wifi (NetworkManager). Named for its job so the
+# USB radios below can never take its place as wlan0.
+[Match]
+Driver=brcmfmac
+
+[Link]
+Name=wlan_host

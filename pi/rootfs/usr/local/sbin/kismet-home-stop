@@ -1,0 +1,30 @@
+#!/bin/sh
+# Fired by the kismet-home-stop timer after home wifi has been up for the grace
+# period. Stops kismet and, if home wifi never dropped since boot (i.e. this was
+# just a boot-at-home session, not a real drive), deletes that session's logs.
+LOGDIR=/var/log/kismet
+LEFT_MARKER=/run/kismet-left-home   # written by the dispatcher on home wifi "down"
+
+/usr/local/sbin/on-home-wifi || exit 0
+
+pid=$(systemctl show -p MainPID --value kismet.service)
+bases=""
+if [ -n "$pid" ] && [ "$pid" != 0 ]; then
+  # Session files = whatever kismet has open in the log dir; strip extension to base.
+  bases=$(for fd in /proc/"$pid"/fd/*; do readlink "$fd"; done 2>/dev/null \
+    | grep "^$LOGDIR/Kismet-" | sed -E 's/\.[^./]+$//' | sort -u)
+fi
+
+systemctl stop kismet.service
+
+if [ -e "$LEFT_MARKER" ]; then
+  echo "home wifi dropped since boot; keeping session logs"
+  exit 0
+fi
+for b in $bases; do
+  for f in "$b".*; do
+    [ -e "$f" ] || continue
+    echo "removing $f"
+    rm -f -- "$f"
+  done
+done
