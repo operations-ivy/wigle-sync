@@ -1,0 +1,5 @@
+#!/bin/sh
+# Exit 0 if the onboard radio is connected to the home wifi network.
+. /etc/default/kismet-pi
+[ -n "$HOME_WIFI_SSID" ] || exit 1
+[ "$(iw dev wlan_host link 2>/dev/null | sed -n 's/^[[:space:]]*SSID: //p')" = "$HOME_WIFI_SSID" ]

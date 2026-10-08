@@ -1,0 +1,24 @@
+#!/bin/sh
+# Stop kismet once home wifi has been up for DELAY (grace period so a boot in
+# the driveway, waiting on a GPS fix before driving off, keeps kismet running).
+# Leaving home wifi cancels a pending stop, (re)starts kismet, and marks this
+# boot as a real outing so kismet-home-stop keeps its logs.
+DELAY=15min
+UNIT=kismet-home-stop
+. /etc/default/kismet-pi
+[ "$1" = wlan_host ] || exit 0
+[ -n "$CONNECTION_UUID" ] || exit 0
+ssid=$(nmcli -g 802-11-wireless.ssid connection show "$CONNECTION_UUID" 2>/dev/null)
+[ "$ssid" = "$HOME_WIFI_SSID" ] || exit 0
+case "$2" in
+  up)
+    systemctl stop "$UNIT.timer" 2>/dev/null || true
+    systemctl reset-failed "$UNIT.service" 2>/dev/null || true
+    systemd-run --collect --unit="$UNIT" --on-active="$DELAY" /usr/local/sbin/kismet-home-stop
+    ;;
+  down)
+    systemctl stop "$UNIT.timer" 2>/dev/null || true
+    touch /run/kismet-left-home
+    systemctl start kismet.service
+    ;;
+esac

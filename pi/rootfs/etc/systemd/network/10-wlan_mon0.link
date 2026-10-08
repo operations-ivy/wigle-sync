@@ -1,0 +1,7 @@
+# Kismet capture radio: any RTL8821CU, matched by USB ID so swapping the dongle
+# keeps the name that kismet_site.conf uses (source=wlan_mon0).
+[Match]
+Property=ID_VENDOR_ID=0bda ID_MODEL_ID=c811
+
+[Link]
+Name=wlan_mon0

@@ -1,0 +1,7 @@
+# Phone AP radio: any RTL8188EUS, matched by USB ID. hostapd runs on it so a
+# phone can reach Kismet's web UI while driving.
+[Match]
+Property=ID_VENDOR_ID=0bda ID_MODEL_ID=8179
+
+[Link]
+Name=wlan_ap
