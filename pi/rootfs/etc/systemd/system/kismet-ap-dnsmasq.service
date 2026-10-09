@@ -1,6 +1,8 @@
 [Unit]
 Description=Kismet phone AP DHCP (dnsmasq on wlan_ap)
 BindsTo=kismet-ap.service
+# BindsTo stops dnsmasq when hostapd stops; PartOf also brings it back on a restart.
+PartOf=kismet-ap.service
 After=kismet-ap.service
 
 [Service]

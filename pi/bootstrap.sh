@@ -36,12 +36,19 @@ if [[ $ID != kali ]]; then
     echo "deb [signed-by=$keyring] https://www.kismetwireless.net/repos/apt/release/$VERSION_CODENAME $VERSION_CODENAME main" \
         > /etc/apt/sources.list.d/kismet.list
 fi
-# Kismet runs as $KISMET_USER, so its capture helpers must be setuid for the kismet group.
-echo "kismet-capture-common kismet-capture-common/install-setuid boolean true" | debconf-set-selections
+# Kismet runs as $KISMET_USER, so its capture helpers must be privileged for the
+# kismet group. Kali's packages ask kismet-capture-common/..., Kismet's repo kismet-common/...
+debconf-set-selections <<'SEL'
+kismet-capture-common kismet-capture-common/install-setuid boolean true
+kismet-capture-common kismet-common/install-setuid boolean true
+SEL
 apt-get update -q
 # dnsmasq-base, not dnsmasq: only kismet-ap-dnsmasq.service should run it.
 apt-get install -y -q kismet gpsd gpsd-clients hostapd dnsmasq-base iw acl
 usermod -aG kismet "$KISMET_USER"
+# gpsd adopts a USB GPS on its udev "add" event, so one plugged in before gpsd
+# was installed is ignored until replugged. Replay the event.
+udevadm trigger --action=add --subsystem-match=tty
 
 # --- files --------------------------------------------------------------------
 changed_links=0
@@ -84,6 +91,8 @@ fi
 
 install -d -m 2770 -o "$KISMET_USER" -g kismet "$LOG_DIR"
 
+bash "$SRC/setup-rtl8188eus.sh"
+
 # --- services -----------------------------------------------------------------
 udevadm control --reload
 systemctl daemon-reload
@@ -112,8 +121,10 @@ phy_supports() { local phy; phy=$(iw dev "$1" info | awk '/wiphy/ {print "phy"$2
 check "wlan_mon0 supports monitor mode" phy_supports wlan_mon0 monitor
 check "wlan_ap supports AP mode" phy_supports wlan_ap AP
 check "kismet_site.conf captures from wlan_mon0" grep -qx "source=wlan_mon0" /etc/kismet/kismet_site.conf
-check "kismet capture helper is setuid" test -u /usr/bin/kismet_cap_linux_wifi
+# Kismet's packages grant file capabilities when setcap exists, else setuid root.
+helper_privileged() { test -u "$1" || /usr/sbin/getcap "$1" | grep -q cap_net_raw; }
+check "kismet capture helper is privileged" helper_privileged /usr/bin/kismet_cap_linux_wifi
 check "kismet-ap (hostapd) running" systemctl is-active kismet-ap.service
-check "gpsd sees a device" sh -c 'gpspipe -w -n 5 2>/dev/null | grep -q "\"class\":\"DEVICES\".*\"path\""'
+check "gpsd sees a device" sh -c 'timeout 10 gpspipe -w -n 5 2>/dev/null | grep -q "\"class\":\"DEVICES\".*\"path\""'
 (( changed_links )) && echo "note: interface names changed; reboot to apply them"
 exit $status
