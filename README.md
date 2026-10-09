@@ -168,11 +168,23 @@ Pi and where its logs live.
 A read-only status page in the same style as chucks-wisdom's console
 (`console.py`, `stats.py`, `templates/console.html`, image built from
 `Dockerfile.web`). Four tiles across the top: next sync, the last sync with the Pi
-(OK, failed, or waiting for the internet) and what it uploaded, the all-time
-total. Below them, a 96h strip of hourly runs on the left and your WiGLE rank
+(OK, failed, or waiting for the internet) and what it uploaded (files and MB), the
+all-time total (files and MB). Below them, a 96h strip of hourly runs on the left and your WiGLE rank
 plus the latest uploads' processing state on the right (one column on a
 phone). Faults from the sync job appear only when there are any, each distinct
 one once with a count. `/api/status` serves the same data as JSON.
+
+The all-time totals (`wigle_sync_files_uploaded_since_launch`,
+`wigle_sync_bytes_uploaded_since_launch`) live in the Pushgateway: each run that
+uploads reads them back and pushes them increased. A run never restarts a total
+that's missing, since an empty gateway may just have lost its data; it logs a
+warning instead. To set them (first time, or after the gateway lost them), recount
+from WiGLE's upload history, which includes any uploads made outside wigle-sync:
+
+```bash
+poetry run python sync.py --seed-totals --dry-run   # print the counts
+PUSHGATEWAY_URL=http://localhost:9091 poetry run python sync.py --seed-totals
+```
 
 It reads from Prometheus (Pushgateway + kube-state-metrics), Loki and the WiGLE
 API (cached 10 min). Each source is independent, so one being down only blanks

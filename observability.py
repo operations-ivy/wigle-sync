@@ -18,9 +18,14 @@ from prometheus_client import pushadd_to_gateway
 from prometheus_client.parser import text_string_to_metric_families
 
 SERVICE_NAME = "wigle-sync"
-# Running total across every run. The Pushgateway keeps it on a persistent
-# volume, so each run that uploads reads it back and pushes it increased.
+# Running totals across every run. The Pushgateway keeps them on a persistent
+# volume, so each run that uploads reads them back and pushes them increased.
 UPLOADED_TOTAL = "wigle_sync_files_uploaded_since_launch"
+BYTES_TOTAL = "wigle_sync_bytes_uploaded_since_launch"
+TOTALS = {
+    UPLOADED_TOTAL: "Files uploaded to WiGLE across every run",
+    BYTES_TOTAL: "Bytes (post-compression) uploaded to WiGLE across every run",
+}
 
 log = structlog.get_logger()
 
@@ -83,16 +88,31 @@ class RunStats:
         return self.failed == 0
 
 
-def pushed_uploaded_total(gateway: str) -> float:
-    """The lifetime upload total the Pushgateway holds now; 0 before it was ever pushed."""
+def pushed_totals(gateway: str) -> dict[str, float]:
+    """The lifetime totals the Pushgateway holds now, by metric name.
+
+    A total that's missing is left out rather than read as 0: the gateway
+    losing its data looks the same as never having had it, and restarting a
+    total from this run's count would silently lose the history. Seed missing
+    totals with `sync.py --seed-totals` instead.
+    """
     url = gateway if "://" in gateway else f"http://{gateway}"
     resp = requests.get(f"{url.rstrip('/')}/metrics", timeout=10)
     resp.raise_for_status()
+    found = {}
     for family in text_string_to_metric_families(resp.text):
         for sample in family.samples:
-            if sample.name == UPLOADED_TOTAL and sample.labels.get("job") == SERVICE_NAME:
-                return sample.value
-    return 0.0
+            if sample.name in TOTALS and sample.labels.get("job") == SERVICE_NAME:
+                found[sample.name] = sample.value
+    return found
+
+
+def push_totals(gateway: str, totals: dict[str, float]) -> None:
+    """Push lifetime totals as given, e.g. to seed them; other metrics are untouched."""
+    registry = CollectorRegistry()
+    for name, value in totals.items():
+        Gauge(name, TOTALS[name], registry=registry).set(value)
+    pushadd_to_gateway(gateway, job=SERVICE_NAME, registry=registry, timeout=10)
 
 
 def push_metrics(stats: RunStats, finished_at: float) -> None:
@@ -125,18 +145,29 @@ def push_metrics(stats: RunStats, finished_at: float) -> None:
         gauge("last_pi_online_timestamp_seconds", "When the Pi was last reachable", finished_at)
         # The last run that actually synced with the Pi; runs while it's away don't replace these.
         gauge("last_sync_files_uploaded", "Files uploaded by the last run that found the Pi", stats.uploaded)
+        gauge("last_sync_bytes_uploaded", "Bytes uploaded by the last run that found the Pi", stats.bytes_uploaded)
         gauge("last_sync_files_failed", "Files that failed in the last run that found the Pi", stats.failed)
         gauge("last_sync_files_deferred", "Files deferred in the last run that found the Pi", stats.deferred)
     if stats.pi_online and stats.succeeded and not stats.deferred:
         gauge("last_success_timestamp_seconds", "When a sync with the Pi last completed cleanly", finished_at)
     if stats.uploaded:
         try:
-            total = pushed_uploaded_total(gateway) + stats.uploaded
+            current = pushed_totals(gateway)
         except Exception:
             # Pushing a total without the old one would reset it; leave it for a human instead.
-            log.warning("Failed to read the upload total, not updating it", uploaded=stats.uploaded, exc_info=True)
+            log.warning("Failed to read the upload totals, not updating them", uploaded=stats.uploaded, exc_info=True)
         else:
-            gauge("files_uploaded_since_launch", "Files uploaded to WiGLE across every run", total)
+            added = {UPLOADED_TOTAL: stats.uploaded, BYTES_TOTAL: stats.bytes_uploaded}
+            for name, value in added.items():
+                if name in current:
+                    gauge(name.removeprefix("wigle_sync_"), TOTALS[name], current[name] + value)
+                else:
+                    log.warning(
+                        "Upload total missing from the Pushgateway, not resetting it; "
+                        "seed it with sync.py --seed-totals",
+                        metric=name,
+                        added=value,
+                    )
 
     try:
         pushadd_to_gateway(gateway, job=SERVICE_NAME, registry=registry, timeout=10)

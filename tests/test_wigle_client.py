@@ -52,3 +52,21 @@ def test_upload_raises_unreachable_when_wigle_cannot_be_reached(tmp_path):
     with mock.patch.object(client.session, "post", side_effect=offline):
         with pytest.raises(WigleUnreachable):
             client.upload(path)
+
+
+def test_transactions_walks_every_page():
+    client = WigleClient("AIDname", "token")
+    pages = [{"results": [{"transid": i} for i in range(start, min(start + 2, 5))]} for start in (0, 2, 4)]
+    responses = [_response(200, p) for p in pages]
+    for r in responses:
+        r.raise_for_status.return_value = None
+
+    with mock.patch.object(client.session, "get", side_effect=responses) as get:
+        got = client.transactions(page_size=2)
+
+    assert [t["transid"] for t in got] == [0, 1, 2, 3, 4]
+    assert [c.kwargs["params"] for c in get.call_args_list] == [
+        {"pagestart": 0, "pageend": 2},
+        {"pagestart": 2, "pageend": 2},
+        {"pagestart": 4, "pageend": 2},
+    ]

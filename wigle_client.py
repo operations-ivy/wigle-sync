@@ -31,6 +31,24 @@ class WigleClient:
         resp.raise_for_status()
         return resp.json()
 
+    def transactions(self, page_size: int = 100) -> list[dict[str, Any]]:
+        """Every upload on record for this account, newest first.
+
+        WiGLE pages with `pagestart` (an offset) and `pageend` (the page size).
+        """
+        out: list[dict[str, Any]] = []
+        while True:
+            resp = self.session.get(
+                f"{WIGLE_API_URL}/file/transactions",
+                params={"pagestart": len(out), "pageend": page_size},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            page = resp.json().get("results", [])
+            out.extend(page)
+            if len(page) < page_size:
+                return out
+
     def upload(self, path: Path) -> dict[str, Any]:
         size = path.stat().st_size
         if size > MAX_UPLOAD_BYTES:

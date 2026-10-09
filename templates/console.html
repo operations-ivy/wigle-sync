@@ -177,7 +177,7 @@ footer{ font-family:var(--font-mono); font-size:11px; color:var(--text-faint); t
       <div class="stat cy"><div class="n" id="s-next">--:--</div><div class="l">Next sync</div><div class="sub" id="s-next-sub">&nbsp;</div></div>
       <div class="stat" id="s-last-box"><div class="n" id="s-last">—</div><div class="l">Last sync</div><div class="sub" id="s-last-sub">&nbsp;</div></div>
       <div class="stat mag"><div class="n" id="s-uploaded">—</div><div class="l">Files uploaded</div><div class="sub" id="s-uploaded-sub">&nbsp;</div></div>
-      <div class="stat mag"><div class="n" id="s-total">—</div><div class="l">All time</div><div class="sub">since launch</div></div>
+      <div class="stat mag"><div class="n" id="s-total">—</div><div class="l">All time</div><div class="sub" id="s-total-sub">since launch</div></div>
     </div>
   </header>
 
@@ -258,6 +258,7 @@ footer{ font-family:var(--font-mono); font-size:11px; color:var(--text-faint); t
     return {
       at: lr.last_pi_online_timestamp_seconds,
       uploaded: have ? lr.last_sync_files_uploaded : (lr.pi_online ? lr.files_uploaded : null),
+      bytes: lr.last_sync_bytes_uploaded != null ? lr.last_sync_bytes_uploaded : (lr.pi_online ? lr.bytes_uploaded : null),
       failed: have ? lr.last_sync_files_failed : (lr.pi_online ? lr.files_failed : 0),
       deferred: have ? lr.last_sync_files_deferred : 0
     };
@@ -297,8 +298,10 @@ footer{ font-family:var(--font-mono); font-size:11px; color:var(--text-faint); t
       $("s-last").textContent = "OK"; box.classList.add("ok"); $("s-last-sub").textContent = ago(ls.at);
     }
     $("s-uploaded").textContent = num(ls.uploaded);
-    $("s-uploaded-sub").textContent = "last sync · " + stamp(ls.at);
+    $("s-uploaded-sub").textContent = "last sync · " + stamp(ls.at) + (ls.bytes ? " · " + bytes(ls.bytes) : "");
     $("s-total").textContent = num(lr.files_uploaded_since_launch);
+    $("s-total-sub").textContent = "since launch" +
+      (lr.bytes_uploaded_since_launch != null ? " · " + bytes(lr.bytes_uploaded_since_launch) : "");
   }
 
   function tickCountdown(){

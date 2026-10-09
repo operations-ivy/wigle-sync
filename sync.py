@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import socket
 import sqlite3
 import sys
@@ -15,10 +16,13 @@ from opentelemetry.trace import Status
 from opentelemetry.trace import StatusCode
 
 from config import Settings
+from observability import BYTES_TOTAL
 from observability import init_logging
 from observability import init_tracing
 from observability import push_metrics
+from observability import push_totals
 from observability import RunStats
+from observability import UPLOADED_TOTAL
 from pi_client import PiClient
 from pi_client import RemoteFile
 from wigle_client import WigleClient
@@ -164,10 +168,39 @@ def run(settings: Settings, stats: RunStats, dry_run: bool = False) -> None:
         pi.close()
 
 
+def seed_totals(settings: Settings, dry_run: bool = False) -> int:
+    """Set the lifetime totals from WiGLE's record of every upload on the account.
+
+    For when the Pushgateway lost them: a run never restarts a missing total.
+    This counts every upload on the account, including any made outside wigle-sync.
+    """
+    wigle = WigleClient(settings.wigle_api_name, settings.wigle_api_token)
+    uploads = wigle.transactions()
+    totals = {
+        UPLOADED_TOTAL: float(len(uploads)),
+        BYTES_TOTAL: float(sum(t.get("fileSize") or 0 for t in uploads)),
+    }
+    log.info("Counted WiGLE's upload history", **totals, dry_run=dry_run)
+    if dry_run:
+        return 0
+    gateway = os.environ.get("PUSHGATEWAY_URL")
+    if not gateway:
+        log.error("PUSHGATEWAY_URL is not set")
+        return 1
+    push_totals(gateway, totals)
+    log.info("Seeded the upload totals", gateway=gateway)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Sync wardriving logs from the Pi to WiGLE")
     parser.add_argument("--dry-run", action="store_true", help="list what would be uploaded without uploading")
     parser.add_argument("--check-auth", action="store_true", help="verify WiGLE credentials and exit")
+    parser.add_argument(
+        "--seed-totals",
+        action="store_true",
+        help="recount the lifetime upload totals from WiGLE's upload history and push them (--dry-run: print only)",
+    )
     args = parser.parse_args()
 
     init_logging()
@@ -178,6 +211,9 @@ def main() -> int:
         profile = wigle.check_auth()
         log.info("WiGLE credentials OK", user=profile.get("userid"))
         return 0
+
+    if args.seed_totals:
+        return seed_totals(settings, dry_run=args.dry_run)
 
     provider = init_tracing()
     stats = RunStats()
