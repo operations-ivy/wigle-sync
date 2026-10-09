@@ -375,9 +375,12 @@ footer{ font-family:var(--font-mono); font-size:11px; color:var(--text-faint); t
         (state.showAllQueue ? "Show latest " + QUEUE_ROWS : "Show all " + ups.length) + '</button>'
       : "";
     $("q-body").innerHTML = ranks + '<div class="table-wrap"><table><thead><tr><th>Upload</th>' +
+      '<th>Captured</th><th>Queued</th>' +
       '<th class="num">Size</th><th>Status</th><th class="num">New GPS</th></tr></thead><tbody>' +
       shown.map(function(u){
-        return '<tr><td class="name">' + esc(u.file) + '</td><td class="num">' + bytes(u.size) + '</td>' +
+        return '<tr><td class="name">' + esc(u.file) + '</td>' +
+          '<td>' + stamp(u.captured_at) + '</td><td>' + stamp(u.queued_at) + '</td>' +
+          '<td class="num">' + bytes(u.size) + '</td>' +
           '<td>' + queueBadge(u) + '</td><td class="num">' + num(u.new_gps) + '</td></tr>';
       }).join("") + '</tbody></table></div>' + more;
     var t = $("toggle-queue");
