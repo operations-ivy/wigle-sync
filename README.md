@@ -108,8 +108,14 @@ ssh zaphod@192.168.1.208 'sudo bash /tmp/wigle-pi/bootstrap.sh'
 ```
 
 It ends with checks (radio names, monitor and AP mode, hostapd, gpsd) and exits 1
-if any fail. If the RTL8188EUS can't do AP mode on the in-kernel driver, build
-[aircrack-ng/rtl8188eus](https://github.com/aircrack-ng/rtl8188eus) with DKMS.
+if any fail. The in-kernel `rtl8xxxu` driver can't put the RTL8188EUS in AP mode,
+so `pi/setup-rtl8188eus.sh` (run by bootstrap) builds
+[aircrack-ng/rtl8188eus](https://github.com/aircrack-ng/rtl8188eus) at a pinned
+commit through DKMS, patched for current kernels by
+`pi/rtl8188eus-kernel-compat.py`, and blacklists `rtl8xxxu`. The build takes a few
+minutes on a Pi 3B+. If a kernel upgrade breaks the DKMS rebuild, the compile
+errors are in `/var/lib/dkms/realtek-rtl8188eus/*/build/make.log`; add the fix to
+the compat script.
 
 When replacing the Pi, copy `/etc/ssh/ssh_host_*` from the old one to keep the
 host key pinned in `known_hosts` below, and `~/.kismet/kismet_httpd.conf` to keep
