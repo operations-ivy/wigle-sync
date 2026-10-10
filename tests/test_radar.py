@@ -154,3 +154,21 @@ def test_first_load_counts_as_done_even_when_wigle_fails():
     with mock.patch.object(radar.requests, "get", side_effect=ConnectionError("WiGLE down")):
         r.refresh_safely()  # logs, doesn't raise
     assert r.first_load_done.is_set()
+
+
+def test_a_failed_fetch_partway_still_shows_what_loaded():
+    uploads = [done("20261010-2"), done("20261009-1"), done("20261008-0")]
+    kmls = {"20261010-2": kml(("a", 40.0, -75.0)), "20261009-1": kml(("b", 40.001, -75.0))}
+    get = fake_wigle(uploads, kmls, [])
+
+    def flaky(url, **kwargs):
+        if url.endswith("20261008-0"):  # the first ghost drive: WiGLE drops the connection
+            raise ConnectionError("Max retries exceeded")
+        return get(url, **kwargs)
+
+    r = radar.Radar(("name", "token"))
+    with mock.patch.object(radar.requests, "get", side_effect=flaky), mock.patch.object(radar, "RADAR_UPLOADS", 2):
+        r.refresh_safely()
+    snap = r.snapshot(now=1791595202.0)
+    assert [d["date"] for d in snap["drives"]] == ["2026-10-10", "2026-10-09"]
+    assert snap["ghost_drives"] == 0 and r.first_load_done.is_set()

@@ -163,22 +163,29 @@ class Radar:
         done = [u["transid"] for u in uploads if u.get("status") == "D" and (u.get("totalGps") or 0) > 0]
         recent, older = done[:RADAR_UPLOADS], done[RADAR_UPLOADS:RADAR_UPLOADS + GHOST_UPLOADS]
         budget = FETCHES_PER_REFRESH
-        for transid in recent + older:
-            if transid in self._recent or transid in self._ghost:
-                continue
-            if transid not in recent:
-                if budget <= 0:
+        try:
+            for transid in recent + older:
+                if transid in self._recent or transid in self._ghost:
                     continue
-                budget -= 1
-            points = parse_kml(self._get(f"/file/kml/{transid}", accept="*/*").text)
-            with self._lock:
-                self._keys[transid] = {p[4] for p in points}
-                if transid in recent:
-                    self._recent[transid] = points
-                else:
-                    self._ghost[transid] = {(round(p[0], 4), round(p[1], 4)) for p in points}
-            log.info("Radar loaded an upload", transid=transid, contacts=len(points),
-                     layer="recent" if transid in recent else "ghost")
+                if transid not in recent:
+                    if budget <= 0:
+                        continue
+                    budget -= 1
+                points = parse_kml(self._get(f"/file/kml/{transid}", accept="*/*").text)
+                with self._lock:
+                    self._keys[transid] = {p[4] for p in points}
+                    if transid in recent:
+                        self._recent[transid] = points
+                    else:
+                        self._ghost[transid] = {(round(p[0], 4), round(p[1], 4)) for p in points}
+                log.info("Radar loaded an upload", transid=transid, contacts=len(points),
+                         layer="recent" if transid in recent else "ghost")
+        finally:
+            # Even when a fetch fails partway, show what did load: otherwise a
+            # pod holds every recent drive and shows none until the next refresh.
+            self._settle(done, recent, older)
+
+    def _settle(self, done: list[str], recent: list[str], older: list[str]) -> None:
         with self._lock:
             # A drive that has aged out of the recent set drops to the ghost layer.
             for transid in [t for t in self._recent if t not in recent]:
