@@ -48,8 +48,10 @@ def test_cache_reuses_values_within_ttl():
 
 
 def _join_refreshes():
+    # Only the cache's own refresh threads: other tests (the console's) leave
+    # long-lived daemon threads running.
     for t in threading.enumerate():
-        if t is not threading.current_thread() and t.daemon:
+        if t.name.startswith("cache-refresh-"):
             t.join(timeout=5)
 
 
