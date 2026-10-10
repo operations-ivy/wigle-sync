@@ -4,7 +4,9 @@ metadata:
   name: wigle-console
   namespace: wigle
 spec:
-  replicas: 1
+  # Two pods on different nodes, so the app keeps answering while one moves,
+  # restarts or rolls out (its PodDisruptionBudget keeps one up during drains).
+  replicas: 2
   selector:
     matchLabels:
       app: wigle-console
@@ -13,6 +15,14 @@ spec:
       labels:
         app: wigle-console
     spec:
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        # Soft: with only one schedulable node left, both still run.
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app: wigle-console
       containers:
       - name: wigle-console
         image: whitepatrick/wigle-console:0.1.3
