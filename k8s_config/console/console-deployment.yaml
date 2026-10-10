@@ -25,7 +25,7 @@ spec:
             app: wigle-console
       containers:
       - name: wigle-console
-        image: whitepatrick/wigle-console:0.1.9
+        image: whitepatrick/wigle-console:0.1.11
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 5000
@@ -74,9 +74,11 @@ spec:
             port: 5000
           initialDelaySeconds: 5
           periodSeconds: 10
+        # Ready only once the radar's first WiGLE load has finished (about a
+        # minute after start), so a rollout keeps the old pod serving until then.
         readinessProbe:
           httpGet:
-            path: /health
+            path: /ready
             port: 5000
           initialDelaySeconds: 5
-          periodSeconds: 10
+          periodSeconds: 5

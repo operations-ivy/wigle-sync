@@ -147,6 +147,9 @@ class Radar:
         # snapshot() is the costly part (every ghost cell projected), and the
         # data only changes on refresh: recompute when the order changes.
         self._snap: tuple[tuple, dict] | None = None
+        # Set once the first refresh has finished, whether or not WiGLE
+        # answered: the pod's readiness waits for it (console.py /ready).
+        self.first_load_done = threading.Event()
 
     def _get(self, path: str, accept: str = "application/json", **params) -> requests.Response:
         # The KML endpoint answers 406 to "Accept: application/json".
@@ -160,22 +163,29 @@ class Radar:
         done = [u["transid"] for u in uploads if u.get("status") == "D" and (u.get("totalGps") or 0) > 0]
         recent, older = done[:RADAR_UPLOADS], done[RADAR_UPLOADS:RADAR_UPLOADS + GHOST_UPLOADS]
         budget = FETCHES_PER_REFRESH
-        for transid in recent + older:
-            if transid in self._recent or transid in self._ghost:
-                continue
-            if transid not in recent:
-                if budget <= 0:
+        try:
+            for transid in recent + older:
+                if transid in self._recent or transid in self._ghost:
                     continue
-                budget -= 1
-            points = parse_kml(self._get(f"/file/kml/{transid}", accept="*/*").text)
-            with self._lock:
-                self._keys[transid] = {p[4] for p in points}
-                if transid in recent:
-                    self._recent[transid] = points
-                else:
-                    self._ghost[transid] = {(round(p[0], 4), round(p[1], 4)) for p in points}
-            log.info("Radar loaded an upload", transid=transid, contacts=len(points),
-                     layer="recent" if transid in recent else "ghost")
+                if transid not in recent:
+                    if budget <= 0:
+                        continue
+                    budget -= 1
+                points = parse_kml(self._get(f"/file/kml/{transid}", accept="*/*").text)
+                with self._lock:
+                    self._keys[transid] = {p[4] for p in points}
+                    if transid in recent:
+                        self._recent[transid] = points
+                    else:
+                        self._ghost[transid] = {(round(p[0], 4), round(p[1], 4)) for p in points}
+                log.info("Radar loaded an upload", transid=transid, contacts=len(points),
+                         layer="recent" if transid in recent else "ghost")
+        finally:
+            # Even when a fetch fails partway, show what did load: otherwise a
+            # pod holds every recent drive and shows none until the next refresh.
+            self._settle(done, recent, older)
+
+    def _settle(self, done: list[str], recent: list[str], older: list[str]) -> None:
         with self._lock:
             # A drive that has aged out of the recent set drops to the ghost layer.
             for transid in [t for t in self._recent if t not in recent]:
@@ -184,6 +194,16 @@ class Radar:
                 for transid in [t for t in store if t not in recent and t not in older]:
                     del store[transid]
             self._order = [t for t in done if t in self._recent or t in self._ghost]
+
+    def refresh_safely(self) -> None:
+        """refresh(), logging instead of raising (WiGLE down or rate limited
+        keeps what's already loaded), and marking the first attempt done."""
+        try:
+            self.refresh()
+        except Exception as e:
+            log.warning("Radar refresh failed", error=str(e))
+        finally:
+            self.first_load_done.set()
 
     def snapshot(self, now: float | None = None) -> dict[str, Any]:
         now = time.time() if now is None else now
