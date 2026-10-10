@@ -1,0 +1,11 @@
+# Keep one wigle-console pod up through node drains and evictions.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: wigle-console
+  namespace: wigle
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: wigle-console
