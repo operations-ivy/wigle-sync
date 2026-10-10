@@ -217,15 +217,26 @@ Locally: port-forward Prometheus (9090) and Loki (3100), then
 The console's second page (`radar.py`, `templates/radar.html`; also at
 `/radar` on the console's own name): a full-screen radar of where recent drives
 found networks. The data comes from WiGLE, not the Pi: each finished upload
-has a KML of the networks it located (`/file/kml/<transid>`), which the
-console fetches once (a processed upload never changes) for the newest
-`RADAR_UPLOADS` uploads (12). After the first load, the 30-minute refresh is a
-single transactions call.
+has a KML of the networks it located (`/file/kml/<transid>`; it answers 406 to
+`Accept: application/json`). An upload never changes once processed, so each
+KML is fetched once and kept.
 
-Only position, time and type are kept; network names and IDs never leave
-`radar.parse_kml`. The page draws each contact by bearing and distance from
-the centre, on a scope sized to hold 90% of them (snapped to 500 m, 1, 2, 3,
-5, 10, 20, 50 or 100 km); a sweep re-lights what it passes, and contacts from
-the last day are yellow. The centre is the median of all contacts (drives
-start and end at home), or `RADAR_CENTER` (`lat,lon`), an optional key in the
-`wigle-sync-secrets` Secret, so home's coordinates never sit in git.
+- **Drives**: the newest `RADAR_UPLOADS` (12) uploads, each in its own colour
+  (newest brightest), with a legend of their dates, how many networks each
+  found, and how many of those were new to you.
+- **New to you**: a network not seen on any earlier drive the radar holds is
+  drawn larger, with a bright core when the sweep passes. WiGLE's KMLs don't
+  say what was new to WiGLE itself, so this is about your own drives.
+- **Ghost streets**: up to `GHOST_UPLOADS` (60) older uploads, kept only as
+  positions rounded to about 11 m and drawn very faintly under everything.
+  Networks line the roads they were found on, so the old drives trace the
+  street grid without a map. They're fetched at most
+  `RADAR_FETCHES_PER_REFRESH` (5) per 30-minute refresh, to go easy on WiGLE.
+
+Network names never leave `radar.parse_kml`. Network IDs are only used, as an
+in-memory hash, to tell a first sighting from a repeat; they never reach the
+page. The scope holds 90% of the recent contacts (snapped to 500 m, 1, 2, 3,
+5, 10, 20, 50 or 100 km), and a sweep re-lights what it passes. The centre is
+the median of the recent contacts (drives start and end at home), or
+`RADAR_CENTER` (`lat,lon`), an optional key in the `wigle-sync-secrets`
+Secret, so home's coordinates never sit in git.

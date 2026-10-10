@@ -5,72 +5,87 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Wardrive radar</title>
 <style>
-  :root { --bg: #020a05; --phosphor: 60, 255, 140; --fresh: 255, 240, 120; }
+  :root { --bg: #020a05; --phosphor: 60, 255, 140; }
   html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden;
                font-family: "DejaVu Sans Mono", ui-monospace, monospace; color: rgb(var(--phosphor)); }
   canvas { display: block; width: 100vw; height: 100vh; }
   #hud { position: fixed; top: 12px; left: 16px; right: 16px; display: flex; justify-content: space-between;
          font-size: 14px; letter-spacing: .04em; pointer-events: none; text-shadow: 0 0 6px rgba(var(--phosphor), .6); }
   #hud b { font-size: 18px; }
-  #legend { position: fixed; bottom: 12px; left: 16px; font-size: 12px; opacity: .8; }
-  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 4px 0 12px; }
+  #legend { position: fixed; bottom: 12px; left: 16px; font-size: 12px; line-height: 1.55; pointer-events: none;
+            text-shadow: 0 0 4px #000, 0 0 8px #000; }
+  #legend .row { white-space: nowrap; }
+  #legend .sw { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+  #legend .new { color: #fff; }
+  #legend .note { opacity: .7; margin-top: 4px; }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <div id="hud"><div><b>WARDRIVE RADAR</b> <span id="sub"></span></div><div id="when"></div></div>
-<div id="legend">
-  <span class="dot" style="background: rgb(255,240,120)"></span>seen in the last day
-  <span class="dot" style="background: rgb(60,255,140)"></span>Wi-Fi
-  <span class="dot" style="background: rgb(110,170,255)"></span>Bluetooth
-  <span class="dot" style="background: rgb(255,150,80)"></span>cell
-</div>
+<div id="legend"></div>
 <script>
 "use strict";
-const SWEEP_MS = 5000, TRAIL = Math.PI / 2, DAY = 86400;
+const SWEEP_MS = 5000, TRAIL = Math.PI / 2;
 const cv = document.getElementById("c"), g = cv.getContext("2d");
 const layer = document.createElement("canvas"), lg = layer.getContext("2d");
 let W = 0, H = 0, R = 0, cx = 0, cy = 0, data = null;
 let buckets = [];  // contacts by whole degree of bearing, for the sweep's glow
 
-function colour(kind, age) {
-  if (age !== null && age < DAY) return [255, 240, 120];
-  if (kind.startsWith("bt") || kind === "ble") return [110, 170, 255];
-  if (["gsm", "lte", "wcdma", "cdma", "nr"].includes(kind)) return [255, 150, 80];
-  return [60, 255, 140];
+// One colour per drive, newest first; older drives fade.
+const HUES = [140, 190, 50, 300, 20, 260, 100, 330, 220, 0, 160, 75];
+function driveColour(d, a = 1) {
+  const light = Math.max(40, 66 - d * 2), alpha = a * Math.max(.35, 1 - d * .055);
+  return `hsla(${HUES[d % HUES.length]}, 100%, ${light}%, ${alpha.toFixed(3)})`;
 }
-function pos(c) {
-  const a = c[0] * Math.PI / 180;
-  return [cx + Math.sin(a) * c[1] * R, cy - Math.cos(a) * c[1] * R];
+function pos(b, r) {
+  const a = b * Math.PI / 180;
+  return [cx + Math.sin(a) * r * R, cy - Math.cos(a) * r * R];
 }
-function km(m) { return m >= 1000 ? `${m / 1000} km` : `${m} m`; }
+function km(m) { return m >= 1000 ? `${+(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`; }
 
 function resize() {
-  const r = window.devicePixelRatio || 1;
+  const ratio = window.devicePixelRatio || 1;
   W = innerWidth; H = innerHeight; cx = W / 2; cy = H / 2 + 10; R = Math.min(W, H - 70) / 2 - 8;
-  for (const c of [cv, layer]) { c.width = W * r; c.height = H * r; }
-  g.setTransform(r, 0, 0, r, 0, 0); lg.setTransform(r, 0, 0, r, 0, 0);
+  for (const c of [cv, layer]) { c.width = W * ratio; c.height = H * ratio; }
+  g.setTransform(ratio, 0, 0, ratio, 0, 0); lg.setTransform(ratio, 0, 0, ratio, 0, 0);
   paintLayer();
 }
 addEventListener("resize", resize);
 
-// Rings, labels and every contact, faint: redrawn only when the data or size changes.
+// Everything static, redrawn only when the data or size changes: the ghost
+// streets, the rings, then each drive's contacts (oldest underneath).
 function paintLayer() {
   lg.clearRect(0, 0, W, H);
+  buckets = Array.from({ length: 360 }, () => []);
+  if (data) {
+    // Ghost streets: older drives' networks line the roads they were found on.
+    lg.fillStyle = "rgba(120, 200, 160, .18)";
+    for (const [b, r] of data.ghost) { const [x, y] = pos(b, r); lg.fillRect(x - 1, y - 1, 2, 2); }
+  }
   lg.strokeStyle = "rgba(60,255,140,.22)"; lg.lineWidth = 1;
   for (const k of [1 / 3, 2 / 3, 1]) { lg.beginPath(); lg.arc(cx, cy, R * k, 0, 7); lg.stroke(); }
   lg.beginPath(); lg.moveTo(cx - R, cy); lg.lineTo(cx + R, cy); lg.moveTo(cx, cy - R); lg.lineTo(cx, cy + R); lg.stroke();
-  buckets = Array.from({ length: 360 }, () => []);
   if (!data) return;
   lg.font = '11px "DejaVu Sans Mono", monospace'; lg.fillStyle = "rgba(60,255,140,.55)";
-  for (const k of [1, 2, 3]) lg.fillText(km(Math.round(data.radius_m * k / 3)), cx + R * k / 3 + 4, cy - 4);
-  for (const c of data.contacts) {
-    const [x, y] = pos(c), [r, gr, b] = colour(c[3], c[2]);
-    lg.fillStyle = `rgba(${r},${gr},${b},${c[2] !== null && c[2] < DAY ? .7 : .28})`;
-    lg.fillRect(x - 1, y - 1, 2, 2);
+  for (const k of [1, 2, 3]) lg.fillText(km(data.radius_m * k / 3), cx + R * k / 3 + 4, cy - 4);
+  const byOldest = [...data.contacts].sort((p, q) => q[4] - p[4] || p[5] - q[5]);
+  for (const c of byOldest) {
+    const [x, y] = pos(c[0], c[1]), isNew = c[5] === 1;
+    lg.fillStyle = driveColour(c[4], isNew ? .9 : .4);
+    const s = isNew ? 3 : 2; lg.fillRect(x - s / 2, y - s / 2, s, s);
     buckets[Math.floor(c[0]) % 360].push(c);
   }
   lg.fillStyle = "rgb(60,255,140)"; lg.beginPath(); lg.arc(cx, cy, 3, 0, 7); lg.fill();
+}
+
+function legend() {
+  const el = document.getElementById("legend");
+  if (!data || !data.drives.length) { el.textContent = ""; return; }
+  el.innerHTML = data.drives.map((d, i) =>
+    `<div class="row"><span class="sw" style="background:${driveColour(i)}"></span>${d.date || "drive"} · ` +
+    `${d.contacts.toLocaleString()} found · <span class="new">${d.new.toLocaleString()} new to you</span></div>`).join("") +
+    `<div class="note">large dots: first seen on that drive · faint grid: ${data.ghost_drives} older drives</div>`;
 }
 
 async function load() {
@@ -78,9 +93,9 @@ async function load() {
     data = await (await fetch("/api/radar", { cache: "no-store" })).json();
     const sub = document.getElementById("sub");
     sub.textContent = data.total
-      ? `· ${data.contacts.length.toLocaleString()} contacts within ${km(data.radius_m)} · last ${data.drives} drives · centred on ${data.centered}`
+      ? `· ${data.contacts.length.toLocaleString()} contacts within ${km(data.radius_m)} · last ${data.drives.length} drives · centred on ${data.centered}`
       : "· no contacts yet (waiting on WiGLE)";
-    paintLayer();
+    paintLayer(); legend();
   } catch (e) { /* keep the last picture */ }
 }
 setInterval(load, 300000); load();
@@ -104,8 +119,9 @@ function frame(now) {
     if (!list || !list.length) continue;
     const a = 1 - d / 90;
     for (const c of list) {
-      const [x, y] = pos(c), [r, gr, b] = colour(c[3], c[2]);
-      g.fillStyle = `rgba(${r},${gr},${b},${a})`; g.fillRect(x - 1.5, y - 1.5, 3, 3);
+      const [x, y] = pos(c[0], c[1]), s = c[5] === 1 ? 4 : 3;
+      g.fillStyle = driveColour(c[4], a); g.fillRect(x - s / 2, y - s / 2, s, s);
+      if (c[5] === 1 && d < 20) { g.fillStyle = `rgba(255,255,255,${(a * .8).toFixed(2)})`; g.fillRect(x - 1, y - 1, 2, 2); }
     }
   }
 }

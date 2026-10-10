@@ -25,7 +25,7 @@ spec:
             app: wigle-console
       containers:
       - name: wigle-console
-        image: whitepatrick/wigle-console:0.1.6
+        image: whitepatrick/wigle-console:0.1.9
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 5000
