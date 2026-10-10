@@ -27,6 +27,11 @@ class Settings:
     min_file_age_seconds: int
     file_extensions: tuple[str, ...]
     compress: bool
+    # Of file_extensions, the ones sent to WiGLE. The rest (Kismet's .kismet
+    # databases) are archived on the Pi without upload: WiGLE recorded nothing
+    # from 57 of them in a row, and the .wiglecsv of the same session already
+    # carries every network.
+    upload_extensions: tuple[str, ...] = (".wiglecsv",)
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -53,4 +58,7 @@ class Settings:
                 ext.strip() for ext in os.environ.get("FILE_EXTENSIONS", ".kismet,.wiglecsv").split(",") if ext.strip()
             ),
             compress=_bool(os.environ.get("COMPRESS_UPLOADS", "true")),
+            upload_extensions=tuple(
+                ext.strip() for ext in os.environ.get("UPLOAD_EXTENSIONS", ".wiglecsv").split(",") if ext.strip()
+            ),
         )

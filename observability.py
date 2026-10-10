@@ -77,6 +77,8 @@ class RunStats:
     files_found: int = 0
     uploaded: int = 0
     archived_empty: int = 0
+    # Not a format worth sending (see Settings.upload_extensions): archived, kept on the Pi.
+    archived_kept: int = 0
     failed: int = 0
     # Left on the Pi because WiGLE was unreachable (e.g. the internet was down). Not a failure.
     deferred: int = 0
@@ -138,6 +140,8 @@ def push_metrics(stats: RunStats, finished_at: float) -> None:
     gauge("files_found", "Capture files ready on the Pi in the last run", stats.files_found)
     gauge("files_uploaded", "Files uploaded to WiGLE in the last run", stats.uploaded)
     gauge("files_archived_empty", "Empty files archived without upload in the last run", stats.archived_empty)
+    gauge("files_archived_kept", "Files archived on the Pi without upload (not an upload format) in the last run",
+          stats.archived_kept)
     gauge("files_failed", "Files that failed to sync in the last run", stats.failed)
     gauge("files_deferred", "Files left on the Pi in the last run because WiGLE was unreachable", stats.deferred)
     gauge("bytes_uploaded", "Bytes (post-compression) uploaded to WiGLE in the last run", stats.bytes_uploaded)
