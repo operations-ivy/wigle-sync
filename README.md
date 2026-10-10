@@ -1,18 +1,19 @@
 # wigle-sync
 application to sync and upload wigle CSV files
 
-Pulls finished `.kismet` / `.wiglecsv` logs off the wardriving Raspberry Pi over
-SFTP, uploads each to [wigle.net](https://wigle.net), then moves it into an
-`uploaded/` directory on the Pi so it's never sent twice.
+Pulls finished `.wiglecsv` logs off the wardriving Raspberry Pi over SFTP,
+uploads each to [wigle.net](https://wigle.net), then moves it into an
+`uploaded/` directory on the Pi so it's never sent twice. Kismet's `.kismet`
+databases are moved into `uploaded/` too, without being downloaded or sent.
 
 Each run is a one-shot sync, designed to run as a Kubernetes `CronJob`:
 
 - **Pi unreachable** (out driving, powered off): logs it and exits 0.
 - **File modified within `MIN_FILE_AGE_SECONDS`**: assumed still open by Kismet, left for a later run.
 - **Upload fails**: the file stays in place on the Pi, is retried next run, and the job exits 1.
-- **Interrupted sessions**: when Kismet was killed mid-write, a `.kismet` has a `-journal` beside it. The app downloads both and lets SQLite roll the journal back before uploading, then archives both.
+- **Only `.wiglecsv` is uploaded** (`UPLOAD_EXTENSIONS`). Until 2026-10-10 the `.kismet` databases were uploaded too, tar.gz'd, and WiGLE recorded zero networks from every one (57 in a row, some over 100 MB); the same session's `.wiglecsv` already carries every network. The `.kismet` files (with any `-journal`) are archived on the Pi as a local record and counted as `files_archived_kept`.
 - **Empty sessions**: header-only `.wiglecsv` and 0-byte files are archived without uploading.
-- **Compression**: files are tar.gz'd before upload (WiGLE's limit is 180 MiB, and Kismet's sqlite logs compress well).
+- **Compression**: files are tar.gz'd before upload (WiGLE's limit is 180 MiB).
 
 ## Architecture
 

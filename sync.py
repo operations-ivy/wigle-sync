@@ -79,6 +79,15 @@ def sync_file(pi: PiClient, wigle: WigleClient, remote_file: RemoteFile, setting
         span.set_attribute("file.size", remote_file.size)
         span.set_attribute("file.has_journal", remote_file.journal_name is not None)
 
+        # Not downloaded at all: a .kismet can be well over 100 MB.
+        if not remote_file.name.endswith(settings.upload_extensions):
+            span.set_attribute("sync.outcome", "archived_kept")
+            log.info("Not an upload format, archiving on the Pi without upload", file=remote_file.name)
+            with tracer.start_as_current_span("pi.archive"):
+                pi.archive(remote_file)
+            stats.archived_kept += 1
+            return
+
         with tracer.start_as_current_span("pi.download"):
             local_path = pi.download(remote_file, Path(tmp))
         if remote_file.journal_name:
