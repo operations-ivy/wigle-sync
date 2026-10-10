@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from unittest import mock
 
+from observability import BYTES_TOTAL
 from observability import push_metrics
+from observability import push_totals
 from observability import RunStats
 from observability import UPLOADED_TOTAL
 
@@ -10,6 +12,8 @@ from observability import UPLOADED_TOTAL
 GATEWAY_WITH_TOTAL = """# TYPE wigle_sync_files_uploaded_since_launch gauge
 wigle_sync_files_uploaded_since_launch{instance="",job="wigle-sync"} 40
 wigle_sync_files_uploaded_since_launch{instance="",job="other"} 999
+# TYPE wigle_sync_bytes_uploaded_since_launch gauge
+wigle_sync_bytes_uploaded_since_launch{instance="",job="wigle-sync"} 5000
 """
 
 
@@ -48,12 +52,37 @@ def test_push_failure_does_not_raise():
             push_metrics(RunStats(), finished_at=1000.0)
 
 
-def test_upload_total_adds_this_run_to_the_pushed_total():
-    assert _pushed(RunStats(pi_online=True, uploaded=3), GATEWAY_WITH_TOTAL)[UPLOADED_TOTAL] == 43
+def test_upload_totals_add_this_run_to_the_pushed_totals():
+    pushed = _pushed(RunStats(pi_online=True, uploaded=3, bytes_uploaded=700), GATEWAY_WITH_TOTAL)
+    assert pushed[UPLOADED_TOTAL] == 43
+    assert pushed[BYTES_TOTAL] == 5700
+    assert pushed["wigle_sync_last_sync_bytes_uploaded"] == 700
 
 
-def test_upload_total_starts_from_zero_when_never_pushed():
-    assert _pushed(RunStats(pi_online=True, uploaded=2), "")[UPLOADED_TOTAL] == 2
+def test_upload_totals_not_restarted_when_missing_from_the_gateway():
+    # An empty gateway may have lost its data; restarting from this run would hide that.
+    pushed = _pushed(RunStats(pi_online=True, uploaded=2, bytes_uploaded=100), "")
+    assert UPLOADED_TOTAL not in pushed
+    assert BYTES_TOTAL not in pushed
+    assert pushed["wigle_sync_files_uploaded"] == 2
+
+
+def test_only_the_missing_total_is_skipped():
+    files_only = GATEWAY_WITH_TOTAL.split("# TYPE wigle_sync_bytes")[0]
+    pushed = _pushed(RunStats(pi_online=True, uploaded=1, bytes_uploaded=10), files_only)
+    assert pushed[UPLOADED_TOTAL] == 41
+    assert BYTES_TOTAL not in pushed
+
+
+def test_push_totals_sends_only_the_totals():
+    with mock.patch("observability.pushadd_to_gateway") as push:
+        push_totals("http://gw:9091", {UPLOADED_TOTAL: 105, BYTES_TOTAL: 123456})
+    registry = push.call_args.kwargs["registry"]
+    assert {s.name: s.value for m in registry.collect() for s in m.samples} == {
+        UPLOADED_TOTAL: 105,
+        BYTES_TOTAL: 123456,
+    }
+    assert push.call_args.kwargs["job"] == "wigle-sync"
 
 
 def test_upload_total_untouched_when_nothing_uploaded():
