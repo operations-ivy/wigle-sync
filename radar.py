@@ -147,6 +147,9 @@ class Radar:
         # snapshot() is the costly part (every ghost cell projected), and the
         # data only changes on refresh: recompute when the order changes.
         self._snap: tuple[tuple, dict] | None = None
+        # Set once the first refresh has finished, whether or not WiGLE
+        # answered: the pod's readiness waits for it (console.py /ready).
+        self.first_load_done = threading.Event()
 
     def _get(self, path: str, accept: str = "application/json", **params) -> requests.Response:
         # The KML endpoint answers 406 to "Accept: application/json".
@@ -184,6 +187,16 @@ class Radar:
                 for transid in [t for t in store if t not in recent and t not in older]:
                     del store[transid]
             self._order = [t for t in done if t in self._recent or t in self._ghost]
+
+    def refresh_safely(self) -> None:
+        """refresh(), logging instead of raising (WiGLE down or rate limited
+        keeps what's already loaded), and marking the first attempt done."""
+        try:
+            self.refresh()
+        except Exception as e:
+            log.warning("Radar refresh failed", error=str(e))
+        finally:
+            self.first_load_done.set()
 
     def snapshot(self, now: float | None = None) -> dict[str, Any]:
         now = time.time() if now is None else now

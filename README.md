@@ -240,3 +240,9 @@ page. The scope holds 90% of the recent contacts (snapped to 500 m, 1, 2, 3,
 the median of the recent contacts (drives start and end at home), or
 `RADAR_CENTER` (`lat,lon`), an optional key in the `wigle-sync-secrets`
 Secret, so home's coordinates never sit in git.
+
+The console's readiness probe is `/ready`, which answers 503 until the
+radar's first WiGLE load has finished (a minute or so), so a new pod takes no
+traffic with an empty radar and a rollout keeps an old pod serving until then.
+A failed load counts as finished, so a WiGLE outage doesn't take the console
+down. Liveness stays on `/health`.

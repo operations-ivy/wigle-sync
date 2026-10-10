@@ -146,3 +146,11 @@ def test_a_network_is_new_only_on_the_first_drive_that_saw_it():
 def test_empty_radar_is_still_a_valid_answer():
     snap = radar.Radar(("a", "b")).snapshot()
     assert (snap["contacts"], snap["drives"], snap["ghost"], snap["total"]) == ([], [], [], 0)
+
+
+def test_first_load_counts_as_done_even_when_wigle_fails():
+    r = radar.Radar(("a", "b"))
+    assert not r.first_load_done.is_set()
+    with mock.patch.object(radar.requests, "get", side_effect=ConnectionError("WiGLE down")):
+        r.refresh_safely()  # logs, doesn't raise
+    assert r.first_load_done.is_set()

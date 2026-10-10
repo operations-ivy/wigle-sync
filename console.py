@@ -35,10 +35,7 @@ _radar = radar.Radar(
 
 def _refresh_radar() -> None:
     while True:
-        try:
-            _radar.refresh()
-        except Exception as e:  # WiGLE down or rate limited: keep what we have
-            radar.log.warning("Radar refresh failed", error=str(e))
+        _radar.refresh_safely()
         time.sleep(RADAR_REFRESH_SECONDS)
 
 
@@ -70,6 +67,16 @@ def api_status():
 @app.route("/health")
 def health_check():
     return "OK"
+
+
+# The readiness probe: not ready until the radar's first load has finished, so
+# a new pod doesn't take traffic with an empty radar. A failed load counts as
+# finished, so a WiGLE outage doesn't take the whole console down.
+@app.route("/ready")
+def ready_check():
+    if _radar.first_load_done.is_set():
+        return "OK"
+    return "loading the radar", 503
 
 
 if __name__ == "__main__":
