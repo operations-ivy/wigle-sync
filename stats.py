@@ -6,6 +6,8 @@ import re
 import threading
 import time
 from collections.abc import Callable
+from datetime import datetime
+from datetime import timezone
 from typing import Any
 
 import requests
@@ -191,6 +193,24 @@ def errors() -> dict[str, Any]:
 
 
 _UPLOAD_NAME = re.compile(r"^\d+_(.+?\.(?:kismet|wiglecsv))")
+# Kismet names each session for its start time, in UTC.
+_KISMET_START = re.compile(r"^Kismet-(\d{8}-\d{2}-\d{2}-\d{2})")
+
+
+def _iso_to_epoch(value: str | None) -> float | None:
+    """WiGLE's timestamps ("2026-10-07T22:56:42.000Z") as epoch seconds."""
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() if value else None
+    except ValueError:
+        return None
+
+
+def _captured_at(name: str | None) -> float | None:
+    """When the Kismet session in this file started, from its name."""
+    match = _KISMET_START.match(name or "")
+    if not match:
+        return None
+    return datetime.strptime(match.group(1), "%Y%m%d-%H-%M-%S").replace(tzinfo=timezone.utc).timestamp()
 
 
 def _wigle() -> dict[str, Any]:
@@ -211,16 +231,18 @@ def _wigle() -> dict[str, Any]:
     uploads = []
     for t in trans.json().get("results", []):
         match = _UPLOAD_NAME.match(t.get("fileName") or "")
+        name = match.group(1) if match else t.get("fileName")
         uploads.append(
             {
                 "transid": t["transid"],
-                "file": match.group(1) if match else t.get("fileName"),
+                "file": name,
                 "size": t.get("fileSize"),
                 "status": t.get("status"),
                 "percent_done": t.get("percentDone"),
                 "new_gps": t.get("discoveredGps"),
                 "total_gps": t.get("totalGps"),
-                "queued_at": t.get("firstTime"),
+                "queued_at": _iso_to_epoch(t.get("firstTime")),
+                "captured_at": _captured_at(name),
             }
         )
     return {

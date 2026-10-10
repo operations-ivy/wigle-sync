@@ -22,6 +22,18 @@ def test_one_dead_source_does_not_blank_the_console():
     assert status["last_run"]["error"].startswith("ConnectionError")
 
 
+def test_wigle_timestamps_become_epoch_seconds():
+    assert stats._iso_to_epoch("2026-10-07T22:56:42.000Z") == 1791413802.0
+    assert stats._iso_to_epoch(None) is None
+    assert stats._iso_to_epoch("not a date") is None
+
+
+def test_capture_time_comes_from_the_kismet_filename_in_utc():
+    assert stats._captured_at("Kismet-20261009-01-04-41-1.kismet") == 1791507881.0
+    assert stats._captured_at("something-else.csv") is None
+    assert stats._captured_at(None) is None
+
+
 def test_upload_names_are_recovered_from_wigles_mangled_filenames():
     mangled = "1790276593_Kismet-20260924-15-14-14-1.wiglecsv0Kismet-20260924-15-14-14-1.wiglecsv"
     assert stats._UPLOAD_NAME.match(mangled).group(1) == "Kismet-20260924-15-14-14-1.wiglecsv"
