@@ -210,3 +210,21 @@ any device on the home WiFi, phones included, with no setup.
 
 Locally: port-forward Prometheus (9090) and Loki (3100), then
 `docker compose up wigle-console` and open http://localhost:5000.
+
+## Radar (`https://radar.brick.nozdormu.cloud`)
+
+The console's second page (`radar.py`, `templates/radar.html`; also at
+`/radar` on the console's own name): a full-screen radar of where recent drives
+found networks. The data comes from WiGLE, not the Pi: each finished upload
+has a KML of the networks it located (`/file/kml/<transid>`), which the
+console fetches once (a processed upload never changes) for the newest
+`RADAR_UPLOADS` uploads (12). After the first load, the 30-minute refresh is a
+single transactions call.
+
+Only position, time and type are kept; network names and IDs never leave
+`radar.parse_kml`. The page draws each contact by bearing and distance from
+the centre, on a scope sized to hold 90% of them (snapped to 500 m, 1, 2, 3,
+5, 10, 20, 50 or 100 km); a sweep re-lights what it passes, and contacts from
+the last day are yellow. The centre is the median of all contacts (drives
+start and end at home), or `RADAR_CENTER` (`lat,lon`), an optional key in the
+`wigle-sync-secrets` Secret, so home's coordinates never sit in git.

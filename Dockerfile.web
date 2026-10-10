@@ -28,7 +28,7 @@ COPY --from=deps /venv /venv
 ENV VIRTUAL_ENV=/venv PATH=/venv/bin:$PATH PYTHONPATH=/code
 WORKDIR /code
 
-COPY config.py observability.py pi_client.py wigle_client.py sync.py stats.py console.py /code/
+COPY config.py observability.py pi_client.py wigle_client.py sync.py stats.py radar.py console.py /code/
 COPY templates/ /code/templates/
 
 EXPOSE 5000

@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wardrive radar</title>
+<style>
+  :root { --bg: #020a05; --phosphor: 60, 255, 140; --fresh: 255, 240, 120; }
+  html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden;
+               font-family: "DejaVu Sans Mono", ui-monospace, monospace; color: rgb(var(--phosphor)); }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #hud { position: fixed; top: 12px; left: 16px; right: 16px; display: flex; justify-content: space-between;
+         font-size: 14px; letter-spacing: .04em; pointer-events: none; text-shadow: 0 0 6px rgba(var(--phosphor), .6); }
+  #hud b { font-size: 18px; }
+  #legend { position: fixed; bottom: 12px; left: 16px; font-size: 12px; opacity: .8; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 4px 0 12px; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"><div><b>WARDRIVE RADAR</b> <span id="sub"></span></div><div id="when"></div></div>
+<div id="legend">
+  <span class="dot" style="background: rgb(255,240,120)"></span>seen in the last day
+  <span class="dot" style="background: rgb(60,255,140)"></span>Wi-Fi
+  <span class="dot" style="background: rgb(110,170,255)"></span>Bluetooth
+  <span class="dot" style="background: rgb(255,150,80)"></span>cell
+</div>
+<script>
+"use strict";
+const SWEEP_MS = 5000, TRAIL = Math.PI / 2, DAY = 86400;
+const cv = document.getElementById("c"), g = cv.getContext("2d");
+const layer = document.createElement("canvas"), lg = layer.getContext("2d");
+let W = 0, H = 0, R = 0, cx = 0, cy = 0, data = null;
+let buckets = [];  // contacts by whole degree of bearing, for the sweep's glow
+
+function colour(kind, age) {
+  if (age !== null && age < DAY) return [255, 240, 120];
+  if (kind.startsWith("bt") || kind === "ble") return [110, 170, 255];
+  if (["gsm", "lte", "wcdma", "cdma", "nr"].includes(kind)) return [255, 150, 80];
+  return [60, 255, 140];
+}
+function pos(c) {
+  const a = c[0] * Math.PI / 180;
+  return [cx + Math.sin(a) * c[1] * R, cy - Math.cos(a) * c[1] * R];
+}
+function km(m) { return m >= 1000 ? `${m / 1000} km` : `${m} m`; }
+
+function resize() {
+  const r = window.devicePixelRatio || 1;
+  W = innerWidth; H = innerHeight; cx = W / 2; cy = H / 2 + 10; R = Math.min(W, H - 70) / 2 - 8;
+  for (const c of [cv, layer]) { c.width = W * r; c.height = H * r; }
+  g.setTransform(r, 0, 0, r, 0, 0); lg.setTransform(r, 0, 0, r, 0, 0);
+  paintLayer();
+}
+addEventListener("resize", resize);
+
+// Rings, labels and every contact, faint: redrawn only when the data or size changes.
+function paintLayer() {
+  lg.clearRect(0, 0, W, H);
+  lg.strokeStyle = "rgba(60,255,140,.22)"; lg.lineWidth = 1;
+  for (const k of [1 / 3, 2 / 3, 1]) { lg.beginPath(); lg.arc(cx, cy, R * k, 0, 7); lg.stroke(); }
+  lg.beginPath(); lg.moveTo(cx - R, cy); lg.lineTo(cx + R, cy); lg.moveTo(cx, cy - R); lg.lineTo(cx, cy + R); lg.stroke();
+  buckets = Array.from({ length: 360 }, () => []);
+  if (!data) return;
+  lg.font = '11px "DejaVu Sans Mono", monospace'; lg.fillStyle = "rgba(60,255,140,.55)";
+  for (const k of [1, 2, 3]) lg.fillText(km(Math.round(data.radius_m * k / 3)), cx + R * k / 3 + 4, cy - 4);
+  for (const c of data.contacts) {
+    const [x, y] = pos(c), [r, gr, b] = colour(c[3], c[2]);
+    lg.fillStyle = `rgba(${r},${gr},${b},${c[2] !== null && c[2] < DAY ? .7 : .28})`;
+    lg.fillRect(x - 1, y - 1, 2, 2);
+    buckets[Math.floor(c[0]) % 360].push(c);
+  }
+  lg.fillStyle = "rgb(60,255,140)"; lg.beginPath(); lg.arc(cx, cy, 3, 0, 7); lg.fill();
+}
+
+async function load() {
+  try {
+    data = await (await fetch("/api/radar", { cache: "no-store" })).json();
+    const sub = document.getElementById("sub");
+    sub.textContent = data.total
+      ? `· ${data.contacts.length.toLocaleString()} contacts within ${km(data.radius_m)} · last ${data.drives} drives · centred on ${data.centered}`
+      : "· no contacts yet (waiting on WiGLE)";
+    paintLayer();
+  } catch (e) { /* keep the last picture */ }
+}
+setInterval(load, 300000); load();
+setInterval(() => { document.getElementById("when").textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }, 1000);
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  g.fillStyle = "#020a05"; g.fillRect(0, 0, W, H);
+  g.drawImage(layer, 0, 0, W, H);
+  const sweep = (now / SWEEP_MS * 2 * Math.PI) % (2 * Math.PI);
+  if (g.createConicGradient) {
+    const grad = g.createConicGradient(sweep - Math.PI / 2 - TRAIL, cx, cy);
+    grad.addColorStop(0, "rgba(60,255,140,0)"); grad.addColorStop(TRAIL / (2 * Math.PI), "rgba(60,255,140,.22)");
+    grad.addColorStop(TRAIL / (2 * Math.PI) + .001, "rgba(60,255,140,0)");
+    g.fillStyle = grad; g.beginPath(); g.arc(cx, cy, R, 0, 7); g.fill();
+  }
+  // Re-light the contacts the sweep has just passed, fading behind it.
+  const head = Math.floor(sweep * 180 / Math.PI);
+  for (let d = 0; d < 90; d++) {
+    const list = buckets[(head - d + 360) % 360];
+    if (!list || !list.length) continue;
+    const a = 1 - d / 90;
+    for (const c of list) {
+      const [x, y] = pos(c), [r, gr, b] = colour(c[3], c[2]);
+      g.fillStyle = `rgba(${r},${gr},${b},${a})`; g.fillRect(x - 1.5, y - 1.5, 3, 3);
+    }
+  }
+}
+resize(); requestAnimationFrame(frame);
+</script>
+</body>
+</html>
