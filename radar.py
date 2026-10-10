@@ -94,9 +94,10 @@ class Radar:
         self._lock = threading.Lock()
         self._kml: dict[str, list] = {}  # transid -> parsed points, newest uploads only
 
-    def _get(self, path: str, **params) -> requests.Response:
+    def _get(self, path: str, accept: str = "application/json", **params) -> requests.Response:
+        # The KML endpoint answers 406 to "Accept: application/json".
         r = requests.get(f"{WIGLE_API_URL}{path}", params=params, auth=self.auth,
-                         headers={"Accept": "application/json"}, timeout=60)
+                         headers={"Accept": accept}, timeout=60)
         r.raise_for_status()
         return r
 
@@ -107,7 +108,7 @@ class Radar:
         for transid in keep:
             if transid in self._kml:
                 continue
-            points = parse_kml(self._get(f"/file/kml/{transid}").text)
+            points = parse_kml(self._get(f"/file/kml/{transid}", accept="*/*").text)
             with self._lock:
                 self._kml[transid] = points
             log.info("Radar loaded an upload", transid=transid, contacts=len(points))

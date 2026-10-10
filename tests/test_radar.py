@@ -71,6 +71,9 @@ def test_refresh_fetches_each_upload_once_and_forgets_old_ones():
 
     def fake_get(url, **kwargs):
         calls.append(url.rsplit("/", 1)[-1])
+        # WiGLE answers 406 to a KML request that only accepts JSON.
+        if "/kml/" in url:
+            assert kwargs["headers"]["Accept"] != "application/json"
         return FakeResponse(uploads if url.endswith("/transactions") else KML)
 
     r = radar.Radar(("name", "token"))
