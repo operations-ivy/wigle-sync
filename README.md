@@ -156,6 +156,17 @@ poetry run python sync.py                # sync
 poetry run pytest
 ```
 
+Besides the unit tests, two files run the real thing end to end. In
+`tests/test_functional_sync.py`, `sync.run()` talks to `tests/fake_pi.py`: a
+real SSH/SFTP server (paramiko's server side) that only accepts one key and
+has a pinned host key, serving a temp directory, plus a stub WiGLE that
+records uploads. It covers a drive (only the `.wiglecsv` uploaded, the
+`.kismet` and empty sessions archived, a still-open file left), a rejected
+upload, WiGLE unreachable, a changed host key, and the Pi away. In
+`tests/test_functional_console.py`, the console app with its background
+threads runs against one stub playing Prometheus, Loki and WiGLE (which, like
+WiGLE, answers 406 to a KML request that asks for JSON).
+
 With Docker (mounts `~/.ssh/wigle_sync_ed25519`, override with `PI_SSH_KEY_HOST_PATH`):
 
 ```bash
