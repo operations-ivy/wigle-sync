@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds a wardriving Pi from a fresh Raspberry Pi OS (or Kali) install: Kismet
-# on wlan_mon0 with gpsd, the phone AP on wlan_ap, the home-wifi stop, the log
-# size watch and the wigle-sync user. Idempotent; re-run after changing pi/.
+# on wlan_mon0 and the onboard Bluetooth with gpsd, the phone AP on wlan_ap, the
+# home-wifi stop, the log size watch and the wigle-sync user. Idempotent;
+# re-run after changing pi/.
 #
 #   scp -r pi zaphod@<pi>:/tmp/wigle-pi
 #   ssh zaphod@<pi> 'sudo install -m 600 /tmp/wigle-pi/kismet-pi.env.example /etc/default/kismet-pi'
@@ -91,6 +92,14 @@ fi
 
 install -d -m 2770 -o "$KISMET_USER" -g kismet "$LOG_DIR"
 
+# Raspberry Pi OS ships the onboard Bluetooth soft-blocked; Kismet's hci0 source
+# needs it unblocked. systemd-rfkill saves the state, so this survives reboots.
+for r in /sys/class/rfkill/rfkill*; do
+    [[ -e $r/type && $(<"$r/type") == bluetooth && $(<"$r/soft") == 1 ]] || continue
+    echo 0 > "$r/soft"
+    echo "unblocked $(<"$r/name")"
+done
+
 bash "$SRC/setup-rtl8188eus.sh"
 
 # --- services -----------------------------------------------------------------
@@ -121,9 +130,14 @@ phy_supports() { local phy; phy=$(iw dev "$1" info | awk '/wiphy/ {print "phy"$2
 check "wlan_mon0 supports monitor mode" phy_supports wlan_mon0 monitor
 check "wlan_ap supports AP mode" phy_supports wlan_ap AP
 check "kismet_site.conf captures from wlan_mon0" grep -qx "source=wlan_mon0" /etc/kismet/kismet_site.conf
+check "kismet_site.conf captures from hci0" grep -q "^source=hci0" /etc/kismet/kismet_site.conf
+check "hci0 exists" test -e /sys/class/bluetooth/hci0
+bt_unblocked() { local r; for r in /sys/class/rfkill/rfkill*; do [[ $(<"$r/type") == bluetooth && $(<"$r/soft") == 1 ]] && return 1; done; return 0; }
+check "bluetooth not blocked" bt_unblocked
 # Kismet's packages grant file capabilities when setcap exists, else setuid root.
 helper_privileged() { test -u "$1" || /usr/sbin/getcap "$1" | grep -q cap_net_raw; }
 check "kismet capture helper is privileged" helper_privileged /usr/bin/kismet_cap_linux_wifi
+check "kismet bluetooth helper is privileged" helper_privileged /usr/bin/kismet_cap_linux_bluetooth
 check "kismet-ap (hostapd) running" systemctl is-active kismet-ap.service
 check "gpsd sees a device" sh -c 'timeout 10 gpspipe -w -n 5 2>/dev/null | grep -q "\"class\":\"DEVICES\".*\"path\""'
 (( changed_links )) && echo "note: interface names changed; reboot to apply them"
