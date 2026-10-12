@@ -82,7 +82,7 @@ cp .env.template .env   # then fill in
 ### Pi side (one time)
 
 The Pi is `brick69` at 192.168.1.208 (static DHCP lease); Kismet logs to
-`/var/log/kismet`. It has three radios, named by udev `.link` files that match
+`/var/log/kismet`. It has three Wi-Fi radios, named by udev `.link` files that match
 the USB chip rather than a MAC, so swapping a dongle keeps its name:
 
 | Name | Radio | Job |
@@ -90,6 +90,11 @@ the USB chip rather than a MAC, so swapping a dongle keeps its name:
 | `wlan_host` | onboard (`brcmfmac`) | Joins home wifi; wigle-sync reaches the Pi through it |
 | `wlan_mon0` | RTL8821CU (`0bda:c811`) | Kismet's capture source |
 | `wlan_ap` | RTL8188EUS (`0bda:8179`) | hostapd AP, so a phone can open Kismet's UI at `http://192.168.50.1:2501` |
+
+Kismet also captures from the onboard Bluetooth (`hci0`), so BT and BLE devices
+go into the `.wiglecsv` alongside Wi-Fi. Raspberry Pi OS ships it soft-blocked;
+`bootstrap.sh` unblocks it. It shares a chip and antenna with `wlan_host`, so it
+slows home 2.4 GHz Wi-Fi a little while Kismet runs, which is only on the road.
 
 GPS is a u-blox 7 on USB, read through gpsd. Once home wifi has been up for 15
 minutes, a NetworkManager dispatcher script stops Kismet, and deletes the session
