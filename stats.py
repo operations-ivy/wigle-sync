@@ -14,6 +14,7 @@ import requests
 import structlog
 
 from sync import pi_is_online
+import console_metrics
 from wigle_client import WIGLE_API_URL
 
 log = structlog.get_logger()
@@ -64,6 +65,12 @@ class _Cache:
             self._entries[key] = (time.time(), value)
         return value
 
+    def peek(self, key: str) -> Any:
+        """The cached value, however old, or None; never fetches."""
+        with self._lock:
+            hit = self._entries.get(key)
+        return hit[1] if hit else None
+
     def _refresh(self, key: str, fn: Callable[[], Any]) -> None:
         try:
             value = fn()
@@ -87,6 +94,7 @@ def _section(name: str, fn: Callable[[], dict[str, Any]]) -> dict[str, Any]:
         return fn()
     except Exception as e:
         log.warning("Status section failed", section=name, error=str(e))
+        console_metrics.SECTION_FAILURES.labels(name).inc()
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -264,6 +272,11 @@ def _wigle() -> dict[str, Any]:
 
 def wigle() -> dict[str, Any]:
     return _cache.get("wigle", WIGLE_TTL_SECONDS, _wigle)
+
+
+def wigle_cached() -> dict[str, Any] | None:
+    """WiGLE's stats as last fetched, for /metrics; None before the first fetch."""
+    return _cache.peek("wigle")
 
 
 def collect() -> dict[str, Any]:

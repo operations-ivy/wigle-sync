@@ -103,3 +103,17 @@ def test_status_api_reads_loki_and_wigle(client):
     [run] = status["history"]["runs"]
     assert (run["uploaded"], run["archived_kept"]) == (1, 1)
     assert status["wigle"]["user"] == "tester"
+
+
+def test_metrics_count_requests_radar_and_wigle_without_names(client):
+    assert wait_for(lambda: client.get("/api/radar").get_json()["drives"])
+    client.get("/api/status")
+    client.get("/no-such-page")
+    assert wait_for(lambda: "wigle_account_rank 1.0" in client.get("/metrics").get_data(as_text=True))
+    text = client.get("/metrics").get_data(as_text=True)
+    assert 'wigle_console_http_requests_total{code="200",route="/api/radar"}' in text
+    assert 'wigle_console_http_requests_total{code="404",route="other"}' in text
+    assert 'wigle_console_radar_refreshes_total{result="ok"} 1.0' in text
+    assert 'wigle_console_radar_drives{layer="recent"} 1.0' in text
+    assert "wigle_console_radar_contacts 1.0" in text
+    assert "SecretNet" not in text and "AA:BB" not in text

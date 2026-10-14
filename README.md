@@ -262,3 +262,24 @@ radar's first WiGLE load has finished (a minute or so), so a new pod takes no
 traffic with an empty radar and a rollout keeps an old pod serving until then.
 A failed load counts as finished, so a WiGLE outage doesn't take the console
 down. Liveness stays on `/health`.
+
+## Metrics
+
+- **The sync job** pushes `wigle_sync_*` to the Pushgateway at the end of
+  each run ("WiGLE Sync" dashboard, `k8s_config/metrics/`).
+- **wigle-console** serves `/metrics` (`console_metrics.py`, scraped through
+  `k8s_config/metrics/console-podmonitor.yaml`): requests by route, the
+  radar's refreshes, drives and contacts, failed status sections, and the
+  account's standing on WiGLE (rank, networks and Bluetooth devices found,
+  uploads still processing), read from the console's own cached fetch. The
+  "WiGLE: console, radar and account" dashboard draws them.
+- **The Pi** (`pi/metrics/`, run by `bootstrap.sh`): node-exporter on
+  localhost, plus `pi-metrics.py` every 30 s: Kismet's open log size and
+  the logs waiting, the GPS fix and satellites, phones on its AP, power and
+  throttling flags, home or away. Prometheus can't reach the Pi while it's
+  out, so a **Prometheus agent** on it scrapes those and remote-writes to
+  `prometheus.brick.nozdormu.cloud`; away, the samples wait in its WAL (up
+  to 24 hours) and arrive once it's home (the cluster's Prometheus accepts
+  them up to 24 hours late). The Pi has no RTC, so **chrony** takes GPS
+  time from gpsd (run with `-n`) when there's no internet, and those
+  samples carry the right time. The "brick69" dashboard draws it all.
