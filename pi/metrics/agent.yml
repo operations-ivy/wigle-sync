@@ -12,6 +12,12 @@ scrape_configs:
       - targets: ["127.0.0.1:9100"]
         labels:
           instance: brick69
+    # The wifi collector also lists every phone on the Pi's own AP by MAC
+    # address: keep only the home Wi-Fi link.
+    metric_relabel_configs:
+      - source_labels: [__name__, device]
+        regex: "node_wifi_station_.+;(wlan_ap|wlan_mon.*)"
+        action: drop
 remote_write:
   - url: https://prometheus.brick.nozdormu.cloud/api/v1/write
     queue_config:

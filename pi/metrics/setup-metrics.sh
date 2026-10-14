@@ -35,7 +35,7 @@ systemctl restart chrony.service
 # node-exporter: localhost only, textfile directory on tmpfs.
 echo 'd /run/node-exporter-textfile 0755 root root -' > /etc/tmpfiles.d/node-exporter-textfile.conf
 systemd-tmpfiles --create /etc/tmpfiles.d/node-exporter-textfile.conf
-node_args='ARGS="--web.listen-address=127.0.0.1:9100 --collector.textfile.directory=/run/node-exporter-textfile --collector.systemd --collector.systemd.enable-restarts-metrics --collector.systemd.unit-include=.+[.](service|timer)"'
+node_args='ARGS="--web.listen-address=127.0.0.1:9100 --collector.textfile.directory=/run/node-exporter-textfile --collector.systemd --collector.systemd.enable-restarts-metrics --collector.systemd.unit-include=.+[.](service|timer) --collector.wifi"'
 if [[ "$(cat /etc/default/prometheus-node-exporter 2>/dev/null)" != "$node_args" ]]; then
     printf '%s\n' "$node_args" > /etc/default/prometheus-node-exporter
     systemctl restart prometheus-node-exporter.service
