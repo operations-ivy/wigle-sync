@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The wardriving Pi's own readings, for node-exporter's textfile collector:
 Kismet's open log size and the logs waiting for wigle-sync, the GPS fix,
-phones on the AP, the Pi's power and throttling flags, and whether it's on
-the home Wi-Fi. Run every 30 s by pi-metrics.timer (as root, to read
+whether the USB Bluetooth dongle is Kismet's hci0, the Pi's power and
+throttling flags, and whether it's on the home Wi-Fi. Run every 30 s by pi-metrics.timer (as root, to read
 Kismet's open files); writes to tmpfs, so the SD card isn't worn by it.
 
 Away from home nothing can reach Prometheus: the Prometheus agent beside it
@@ -19,7 +19,6 @@ import tempfile
 
 OUT = os.environ.get("PI_METRICS_FILE", "/run/node-exporter-textfile/pi.prom")
 LOG_DIR = os.environ.get("KISMET_LOG_DIR", "/var/log/kismet")
-AP_IFACE = os.environ.get("AP_IFACE", "wlan_ap")
 
 
 def run(*cmd, timeout=10):
@@ -81,11 +80,15 @@ def gps(timeout=3.0):
     return mode, used
 
 
-def ap_stations():
-    r = run("/usr/sbin/iw", "dev", AP_IFACE, "station", "dump")
-    if r is None or r.returncode != 0:
+def bt_dongle(uevent="/sys/class/bluetooth/hci0/device/uevent"):
+    """1 when hci0 is a USB adapter (the long-range dongle), 0 when it's
+    something else (the onboard chip, if disable-bt didn't take), None when
+    there's no hci0 at all."""
+    try:
+        with open(uevent) as f:
+            return int("DRIVER=btusb" in f.read().split())
+    except OSError:
         return None
-    return sum(1 for line in r.stdout.splitlines() if line.startswith("Station "))
 
 
 def throttled():
@@ -118,7 +121,7 @@ def render():
     mode, used = gps()
     gauge("pi_gps_fix_mode", "gpsd's fix: 0 unknown, 1 none, 2 2D, 3 3D.", mode)
     gauge("pi_gps_satellites_used", "Satellites in the fix.", used)
-    gauge("pi_ap_stations", "Phones connected to the Pi's own access point.", ap_stations())
+    gauge("pi_bt_dongle", "1 while Kismet's hci0 is the USB Bluetooth dongle, 0 if it's another adapter.", bt_dongle())
     gauge("pi_home_wifi", "1 while the Pi is on the home Wi-Fi.", home())
     flags = throttled()
     if flags is not None:

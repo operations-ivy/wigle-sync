@@ -759,9 +759,9 @@ data:
           "id": 11
         },
         {
-          "type": "timeseries",
-          "title": "Phones on the Pi's AP",
-          "description": "",
+          "type": "stat",
+          "title": "Bluetooth dongle",
+          "description": "Kismet's hci0 is the long-range USB dongle (1), another adapter (0), or missing (no data).",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -773,42 +773,60 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "max(pi_ap_stations)",
-              "legendFormat": ""
+              "expr": "max(pi_bt_dongle)",
+              "legendFormat": "",
+              "instant": true
             }
           ],
           "fieldConfig": {
             "defaults": {
               "unit": "none",
-              "custom": {
-                "drawStyle": "line",
-                "lineWidth": 1,
-                "fillOpacity": 15,
-                "showPoints": "never",
-                "spanNulls": false,
-                "lineInterpolation": "stepAfter",
-                "stacking": {
-                  "mode": "none",
-                  "group": "A"
-                },
-                "axisSoftMin": 0
-              },
               "color": {
-                "mode": "palette-classic"
+                "mode": "thresholds"
+              },
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "0": {
+                      "text": "Not the dongle",
+                      "color": "orange",
+                      "index": 0
+                    },
+                    "1": {
+                      "text": "Dongle",
+                      "color": "green",
+                      "index": 1
+                    }
+                  }
+                }
+              ],
+              "noValue": "Missing",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
               }
             },
             "overrides": []
           },
           "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "calcs": []
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
             },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "auto",
+            "justifyMode": "auto",
+            "orientation": "auto"
           },
           "gridPos": {
             "h": 8,
