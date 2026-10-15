@@ -82,19 +82,26 @@ cp .env.template .env   # then fill in
 ### Pi side (one time)
 
 The Pi is `brick69` at 192.168.1.208 (static DHCP lease); Kismet logs to
-`/var/log/kismet`. It has three Wi-Fi radios, named by udev `.link` files that match
+`/var/log/kismet`. It has two Wi-Fi radios, named by udev `.link` files that match
 the USB chip rather than a MAC, so swapping a dongle keeps its name:
 
 | Name | Radio | Job |
 | --- | --- | --- |
 | `wlan_host` | onboard (`brcmfmac`) | Joins home wifi; wigle-sync reaches the Pi through it |
 | `wlan_mon0` | RTL8821CU (`0bda:c811`) | Kismet's capture source |
-| `wlan_ap` | RTL8188EUS (`0bda:8179`) | hostapd AP, so a phone can open Kismet's UI at `http://192.168.50.1:2501` |
 
-Kismet also captures from the onboard Bluetooth (`hci0`), so BT and BLE devices
-go into the `.wiglecsv` alongside Wi-Fi. Raspberry Pi OS ships it soft-blocked;
-`bootstrap.sh` unblocks it. It shares a chip and antenna with `wlan_host`, so it
-slows home 2.4 GHz Wi-Fi a little while Kismet runs, which is only on the road.
+Kismet also captures from a long-range USB Bluetooth dongle (`hci0`), so BT and
+BLE devices go into the `.wiglecsv` alongside Wi-Fi. The onboard Bluetooth is off
+(`dtoverlay=disable-bt`, added by `bootstrap.sh`): it shared a chip and antenna
+with `wlan_host`, and with it off the dongle is always `hci0`. `bootstrap.sh`
+unblocks the adapter if it comes up soft-blocked, and checks that `hci0` is the
+USB one (`btusb`); `pi_bt_dongle` says the same on the brick69 dashboard.
+
+There's no phone AP any more (it was an RTL8188EUS running hostapd, retired
+2026-10-15 for the dongle's USB slot), so Kismet's UI isn't reachable on the
+road; at home it's on the home Wi-Fi at port 2501. `bootstrap.sh` removes what
+the AP left behind on a Pi that had it (its units and config, hostapd, and the
+patched `realtek-rtl8188eus` DKMS driver).
 
 GPS is a u-blox 7 on USB, read through gpsd. Once home wifi has been up for 15
 minutes, a NetworkManager dispatcher script stops Kismet, and deletes the session
@@ -103,7 +110,7 @@ network).
 
 `pi/bootstrap.sh` builds all of this on a fresh Raspberry Pi OS (or Kali) install
 and is safe to re-run. Kismet comes from Kismet's own apt repo on Raspberry Pi OS.
-The SSIDs and the AP passphrase live only on the Pi, in `/etc/default/kismet-pi`
+The home SSID lives only on the Pi, in `/etc/default/kismet-pi`
 (start from `pi/kismet-pi.env.example`):
 
 ```bash
@@ -113,15 +120,8 @@ ssh -t zaphod@192.168.1.208 'sudoedit /etc/default/kismet-pi'
 ssh zaphod@192.168.1.208 'sudo bash /tmp/wigle-pi/bootstrap.sh'
 ```
 
-It ends with checks (radio names, monitor and AP mode, hostapd, gpsd) and exits 1
-if any fail. The in-kernel `rtl8xxxu` driver can't put the RTL8188EUS in AP mode,
-so `pi/setup-rtl8188eus.sh` (run by bootstrap) builds
-[aircrack-ng/rtl8188eus](https://github.com/aircrack-ng/rtl8188eus) at a pinned
-commit through DKMS, patched for current kernels by
-`pi/rtl8188eus-kernel-compat.py`, and blacklists `rtl8xxxu`. The build takes a few
-minutes on a Pi 3B+. If a kernel upgrade breaks the DKMS rebuild, the compile
-errors are in `/var/lib/dkms/realtek-rtl8188eus/*/build/make.log`; add the fix to
-the compat script.
+It ends with checks (radio names, monitor mode, the Bluetooth dongle as `hci0`,
+gpsd) and exits 1 if any fail.
 
 When replacing the Pi, copy `/etc/ssh/ssh_host_*` from the old one to keep the
 host key pinned in `known_hosts` below, and `~/.kismet/kismet_httpd.conf` to keep
@@ -275,7 +275,7 @@ down. Liveness stays on `/health`.
   "WiGLE: console, radar and account" dashboard draws them.
 - **The Pi** (`pi/metrics/`, run by `bootstrap.sh`): node-exporter on
   localhost, plus `pi-metrics.py` every 30 s: Kismet's open log size and
-  the logs waiting, the GPS fix and satellites, phones on its AP, power and
+  the logs waiting, the GPS fix and satellites, whether the Bluetooth dongle is `hci0`, power and
   throttling flags, home or away. Prometheus can't reach the Pi while it's
   out, so a **Prometheus agent** on it scrapes those and remote-writes to
   `prometheus.brick.nozdormu.cloud`; away, the samples wait in its WAL (up
