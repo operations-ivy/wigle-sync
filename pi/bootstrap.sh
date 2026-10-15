@@ -114,6 +114,7 @@ fi
 # Kismet itself is left alone: starting it at home would record a home session.
 
 bash "$SRC/setup-kismet-size-watch.sh"
+bash "$SRC/metrics/setup-metrics.sh"
 if [[ -n ${WIGLE_SYNC_PUBKEY:-} ]]; then
     bash "$SRC/setup-pi-user.sh" "$WIGLE_SYNC_PUBKEY"
 else
@@ -139,6 +140,9 @@ helper_privileged() { test -u "$1" || /usr/sbin/getcap "$1" | grep -q cap_net_ra
 check "kismet capture helper is privileged" helper_privileged /usr/bin/kismet_cap_linux_wifi
 check "kismet bluetooth helper is privileged" helper_privileged /usr/bin/kismet_cap_linux_bluetooth
 check "kismet-ap (hostapd) running" systemctl is-active kismet-ap.service
+check "node-exporter answers on localhost" sh -c 'curl -fsS http://127.0.0.1:9100/metrics | grep -q "^pi_gps_fix_mode"'
+check "Prometheus agent running" systemctl is-active prometheus.service
+check "chrony running" systemctl is-active chrony.service
 check "gpsd sees a device" sh -c 'timeout 10 gpspipe -w -n 5 2>/dev/null | grep -q "\"class\":\"DEVICES\".*\"path\""'
 (( changed_links )) && echo "note: interface names changed; reboot to apply them"
 exit $status

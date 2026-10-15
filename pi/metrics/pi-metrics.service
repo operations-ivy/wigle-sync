@@ -1,0 +1,6 @@
+[Unit]
+Description=Write the Pi's readings for node-exporter (pi-metrics.py)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pi-metrics

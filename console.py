@@ -5,11 +5,15 @@ import threading
 import time
 
 from flask import Flask
+from flask import g
 from flask import jsonify
 from flask import render_template
 from flask import request
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
+from prometheus_client import CONTENT_TYPE_LATEST
+from prometheus_client import generate_latest
 
+import console_metrics
 import radar
 import stats
 from observability import init_logging
@@ -22,7 +26,7 @@ app = Flask(__name__)
 # Build the first status in the background at start-up, so even the first
 # visitor after a deploy gets a cached answer instead of waiting on Loki.
 threading.Thread(target=stats.collect, daemon=True).start()
-FlaskInstrumentor().instrument_app(app, excluded_urls="health")
+FlaskInstrumentor().instrument_app(app, excluded_urls="health,ready,metrics")
 
 # The radar (radar.brick.nozdormu.cloud): each finished upload's KML is fetched
 # once, so after the first load a refresh is one cheap transactions call.
@@ -40,6 +44,27 @@ def _refresh_radar() -> None:
 
 
 threading.Thread(target=_refresh_radar, daemon=True).start()
+console_metrics.register_live(_radar, stats.wigle_cached)
+
+
+@app.before_request
+def _start_timer():
+    g.started = time.monotonic()
+
+
+@app.after_request
+def _count(response):
+    # The matched route, not the raw path, so random paths make no new series.
+    route = request.url_rule.rule if request.url_rule else "other"
+    console_metrics.REQUESTS.labels(route, str(response.status_code)).inc()
+    if "started" in g:
+        console_metrics.REQUEST_SECONDS.labels(route).observe(time.monotonic() - g.started)
+    return response
+
+
+@app.route("/metrics")
+def prometheus_metrics():
+    return generate_latest(), 200, {"Content-Type": CONTENT_TYPE_LATEST}
 
 
 @app.route("/")

@@ -35,6 +35,7 @@ from typing import Any
 import requests
 import structlog
 
+import console_metrics
 from wigle_client import WIGLE_API_URL
 
 log = structlog.get_logger()
@@ -172,6 +173,7 @@ class Radar:
                         continue
                     budget -= 1
                 points = parse_kml(self._get(f"/file/kml/{transid}", accept="*/*").text)
+                console_metrics.KML_FETCHES.inc()
                 with self._lock:
                     self._keys[transid] = {p[4] for p in points}
                     if transid in recent:
@@ -198,12 +200,23 @@ class Radar:
     def refresh_safely(self) -> None:
         """refresh(), logging instead of raising (WiGLE down or rate limited
         keeps what's already loaded), and marking the first attempt done."""
+        started = time.monotonic()
         try:
             self.refresh()
+            console_metrics.RADAR_REFRESHES.labels("ok").inc()
+            console_metrics.RADAR_LAST_SUCCESS.set_to_current_time()
         except Exception as e:
             log.warning("Radar refresh failed", error=str(e))
+            console_metrics.RADAR_REFRESHES.labels("error").inc()
         finally:
+            console_metrics.RADAR_REFRESH_SECONDS.observe(time.monotonic() - started)
             self.first_load_done.set()
+
+    def counts(self) -> dict[str, int]:
+        """How many drives each layer holds, and the recent drives' contacts."""
+        with self._lock:
+            return {"recent": len(self._recent), "ghost": len(self._ghost),
+                    "contacts": sum(len(p) for p in self._recent.values())}
 
     def snapshot(self, now: float | None = None) -> dict[str, Any]:
         now = time.time() if now is None else now

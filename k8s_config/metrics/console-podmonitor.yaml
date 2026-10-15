@@ -1,0 +1,16 @@
+# Prometheus scrapes wigle-console's /metrics (console_metrics.py). The sync
+# job's own metrics still go through the Pushgateway. Dashboard:
+# wigle-console-dashboard-configmap.yaml.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: wigle-console
+  namespace: wigle
+spec:
+  selector:
+    matchLabels:
+      app: wigle-console
+  podMetricsEndpoints:
+  - port: http
+    path: /metrics
+    interval: 30s

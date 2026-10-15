@@ -77,3 +77,10 @@ def test_failed_refresh_keeps_the_stale_value():
     assert cache.get("k", 0, mock.Mock(side_effect=OSError("loki down"))) == 1
     _join_refreshes()
     assert cache.get("k", 60, lambda: 3) == 1
+
+
+def test_peek_never_fetches():
+    cache = stats._Cache()
+    assert cache.peek("k") is None
+    cache.get("k", 60, lambda: {"rank": 3})
+    assert cache.peek("k") == {"rank": 3}
