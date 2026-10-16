@@ -217,9 +217,10 @@ it, because a cold build takes ~10s (mostly Loki's 96h queries). The console
 builds the first status at start-up, so only a request in its first seconds
 waits.
 
-```bash
-kubectl apply -f k8s_config/console/
-```
+Argo CD deploys all of `k8s_config/` from `main` (brick-k8s-config's
+`argocd/apps/wigle-sync.yaml`), so a merge is the deploy, within about 3
+minutes; a change made by hand is put back. To try a branch on the cluster
+first: `scripts/trial-branch wigle-sync <branch>` in brick-k8s-config (and `scripts/trial-branch wigle-sync main` after the merge).
 
 `wigle.brick.nozdormu.cloud` is served through brick9000's proxy, over HTTPS
 (see `brick-k8s-config`'s README, "LAN names for ingresses"), so it opens from
