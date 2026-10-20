@@ -61,6 +61,8 @@ def test_pi_is_online():
         port = server.getsockname()[1]
         assert pi_is_online("127.0.0.1", port, timeout=1)
     assert not pi_is_online("127.0.0.1", port, timeout=1)
+    # PI_HOST is a name: away from home it may not resolve at all.
+    assert not pi_is_online("brick69.invalid", port, timeout=1)
 
 
 def test_wigle_unreachable_defers_the_rest_of_the_run():

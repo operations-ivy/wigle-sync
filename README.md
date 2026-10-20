@@ -114,10 +114,10 @@ The home SSID lives only on the Pi, in `/etc/default/kismet-pi`
 (start from `pi/kismet-pi.env.example`):
 
 ```bash
-scp -r pi zaphod@192.168.1.208:/tmp/wigle-pi
-ssh zaphod@192.168.1.208 'sudo install -m 600 /tmp/wigle-pi/kismet-pi.env.example /etc/default/kismet-pi'
-ssh -t zaphod@192.168.1.208 'sudoedit /etc/default/kismet-pi'
-ssh zaphod@192.168.1.208 'sudo bash /tmp/wigle-pi/bootstrap.sh'
+scp -r pi zaphod@brick69:/tmp/wigle-pi
+ssh zaphod@brick69 'sudo install -m 600 /tmp/wigle-pi/kismet-pi.env.example /etc/default/kismet-pi'
+ssh -t zaphod@brick69 'sudoedit /etc/default/kismet-pi'
+ssh zaphod@brick69 'sudo bash /tmp/wigle-pi/bootstrap.sh'
 ```
 
 It ends with checks (radio names, monitor mode, the Bluetooth dongle as `hci0`,
@@ -133,8 +133,8 @@ whose only access is an ACL on that log dir. `pi/setup-pi-user.sh` sets this up
 
 ```bash
 ssh-keygen -t ed25519 -f ~/.ssh/wigle_sync_ed25519 -N "" -C wigle-sync
-ssh zaphod@192.168.1.208 "sudo bash -s -- '$(cat ~/.ssh/wigle_sync_ed25519.pub)'" < pi/setup-pi-user.sh
-ssh-keyscan -t ed25519 192.168.1.208 > known_hosts   # pins the Pi's host key
+ssh zaphod@brick69 "sudo bash -s -- '$(cat ~/.ssh/wigle_sync_ed25519.pub)'" < pi/setup-pi-user.sh
+ssh-keyscan -t ed25519 brick69 | sed "s/^brick69 /brick69,192.168.1.208 /" > known_hosts   # pins the Pi's host key, by name and address
 ```
 
 WiGLE rejects uploads over 180 MiB, and Kismet can't rotate `.kismet` logs by
@@ -144,8 +144,8 @@ starts a new log. Change the cap with `KISMET_MAX_MB` in
 `pi/kismet-size-watch.service`. To install, or reinstall after a change:
 
 ```bash
-scp pi/kismet-size-watch.* pi/setup-kismet-size-watch.sh zaphod@192.168.1.208:/tmp/
-ssh zaphod@192.168.1.208 'sudo bash /tmp/setup-kismet-size-watch.sh'
+scp pi/kismet-size-watch.* pi/setup-kismet-size-watch.sh zaphod@brick69:/tmp/
+ssh zaphod@brick69 'sudo bash /tmp/setup-kismet-size-watch.sh'
 ```
 
 ## Running

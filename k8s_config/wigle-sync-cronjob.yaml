@@ -42,7 +42,7 @@ spec:
                 - name: WIGLE_DONATE
                   value: "false"
                 - name: PI_HOST
-                  value: "192.168.1.208"
+                  value: "brick69"
                 - name: PI_USER
                   value: "wigle-sync"
                 - name: PI_SSH_KEY_PATH
