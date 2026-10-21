@@ -78,6 +78,19 @@ def test_a_drive_is_uploaded_as_wiglecsv_and_everything_else_archived(world):
     assert sorted(f for f in os.listdir(kismet) if f.startswith("Kismet")) == ["Kismet-C.wiglecsv"]
 
 
+def test_surveillance_devices_on_a_drive_are_counted(world):
+    kismet, settings, wigle = world
+    flock = "12:34:56:78:9a:bc,Flock-A1B2C3,[WPA2],2026-10-09 21:15:02,6,-70,40.0,-75.0\n"
+    put(kismet, "Kismet-A.wiglecsv", HEADER + ROW + flock)
+    stats = RunStats()
+    sync.run(settings, stats)
+    assert stats.uploaded == 1 and stats.detections == {"flock": 1}
+    [(name, body)] = wigle.uploads
+    gz = body[body.index(b"\x1f\x8b"):]
+    with tarfile.open(fileobj=io.BytesIO(gz), mode="r:gz") as tar:
+        assert flock.encode() in tar.extractfile("Kismet-A.wiglecsv").read()  # still uploaded as it was
+
+
 def test_a_rejected_upload_stays_on_the_pi_for_the_next_run(world):
     kismet, settings, wigle = world
     put(kismet, "Kismet-A.wiglecsv", HEADER + ROW)

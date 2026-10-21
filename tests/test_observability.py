@@ -110,3 +110,24 @@ def test_last_sync_gauges_only_pushed_when_the_pi_was_home():
 
     away = _pushed(RunStats(pi_online=False))
     assert not any(k.startswith("wigle_sync_last_sync_") for k in away)
+
+
+def _labelled(stats: RunStats) -> dict[tuple[str, str], float]:
+    with mock.patch.dict("os.environ", {"PUSHGATEWAY_URL": "http://gw:9091"}):
+        with mock.patch("observability.pushadd_to_gateway") as push:
+            push_metrics(stats, finished_at=1000.0)
+    registry = push.call_args.kwargs["registry"]
+    return {
+        (s.labels["kind"], s.labels["confidence"]): s.value
+        for m in registry.collect()
+        for s in m.samples
+        if s.name == "wigle_sync_last_sync_detections"
+    }
+
+
+def test_detections_pushed_for_every_kind_when_the_pi_was_home():
+    from collections import Counter
+
+    home = _labelled(RunStats(pi_online=True, detections=Counter({"flock": 2, "skimmer": 1})))
+    assert home == {("flock", "medium"): 2, ("axon", "high"): 0, ("flipper", "high"): 0, ("skimmer", "low"): 1}
+    assert _labelled(RunStats(pi_online=False)) == {}  # away: the last drive's counts stay as they were

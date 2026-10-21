@@ -15,6 +15,7 @@ from opentelemetry import trace
 from opentelemetry.trace import Status
 from opentelemetry.trace import StatusCode
 
+import detect
 from config import Settings
 from observability import BYTES_TOTAL
 from observability import init_logging
@@ -101,6 +102,14 @@ def sync_file(pi: PiClient, wigle: WigleClient, remote_file: RemoteFile, setting
                 pi.archive(remote_file)
             stats.archived_empty += 1
             return
+
+        with tracer.start_as_current_span("detect"):
+            found = detect.scan(local_path)
+        if found:
+            # Counts only: no addresses, names or places (detect.py).
+            stats.detections.update(found)
+            log.info("Surveillance devices on this drive", file=remote_file.name, **found)
+        span.set_attribute("detect.alerting", sum(detect.alerting(found).values()))
 
         if settings.compress:
             with tracer.start_as_current_span("compress"):
@@ -242,7 +251,7 @@ def main() -> int:
             if not stats.succeeded:
                 span.set_status(Status(StatusCode.ERROR))
         stats.duration_seconds = time.monotonic() - started
-        log.info("Sync complete", **vars(stats))
+        log.info("Sync complete", **{**vars(stats), "detections": dict(stats.detections)})
         if not args.dry_run:
             push_metrics(stats, finished_at=time.time())
     finally:

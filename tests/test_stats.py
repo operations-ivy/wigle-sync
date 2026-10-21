@@ -84,3 +84,22 @@ def test_peek_never_fetches():
     assert cache.peek("k") is None
     cache.get("k", 60, lambda: {"rank": 3})
     assert cache.peek("k") == {"rank": 3}
+
+
+def test_detections_read_by_kind_and_unknown_kinds_ignored():
+    result = [
+        {"metric": {"__name__": "wigle_sync_last_sync_detections", "kind": k, "confidence": c}, "value": [0, v]}
+        for k, c, v in (("flock", "medium", "2"), ("skimmer", "low", "3"), ("axon", "high", "0"), ("old", "high", "9"))
+    ]
+    with mock.patch.object(stats, "_prom", return_value=result) as prom:
+        found = stats.detections()
+    assert prom.call_args.args[0] == "wigle_sync_last_sync_detections"
+    assert found["kinds"]["flock"] == {"label": "Flock ALPR camera", "confidence": "medium", "count": 2}
+    assert "old" not in found["kinds"]
+    assert found["alerting"] == 2  # the low-confidence skimmer guesses don't count
+
+
+def test_last_run_leaves_the_labelled_detections_out():
+    with mock.patch.object(stats, "_prom_values", return_value={"wigle_sync_pi_online": 1.0}) as values:
+        assert stats.last_run() == {"pi_online": 1.0}
+    assert '__name__!="wigle_sync_last_sync_detections"' in values.call_args.args[0]
