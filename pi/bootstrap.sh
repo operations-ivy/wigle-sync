@@ -100,6 +100,25 @@ if [[ -f $config ]] && ! grep -qx "dtoverlay=disable-bt" "$config"; then
     bt_reboot=1
 fi
 
+# LED1, the top RGB module on the header, copies the onboard LEDs the case
+# hides: red on (actpwr: power, off during activity), green on SD activity
+# (mmc0, like ACT). The other two modules have no job yet; held low from boot
+# so their default pull-ups (GPIO 5 and 6) don't light them faintly. Next boot.
+led_reboot=0
+led_lines=(
+    "dtoverlay=gpio-led,gpio=16,label=led1-red,trigger=actpwr"
+    "dtoverlay=gpio-led,gpio=20,label=led1-green,trigger=mmc0"
+    "gpio=5,6,13,17,21,22,27=op,dl"
+)
+if [[ -f $config ]]; then
+    for line in "${led_lines[@]}"; do
+        grep -qxF "$line" "$config" && continue
+        printf '# wigle-sync: RGB status LEDs (pi/bootstrap.sh)\n%s\n' "$line" >> "$config"
+        echo "added to $config: $line"
+        led_reboot=1
+    done
+fi
+
 # A Bluetooth adapter can come up soft-blocked; Kismet's hci0 source needs it
 # unblocked. systemd-rfkill saves the state, so this survives reboots.
 for r in /sys/class/rfkill/rfkill*; do
@@ -148,4 +167,5 @@ check "chrony running" systemctl is-active chrony.service
 check "gpsd sees a device" sh -c 'timeout 10 gpspipe -w -n 5 2>/dev/null | grep -q "\"class\":\"DEVICES\".*\"path\""'
 (( changed_links )) && echo "note: interface names changed; reboot to apply them"
 (( bt_reboot )) && echo "note: reboot to turn the onboard Bluetooth off (the dongle becomes hci0)"
+(( led_reboot )) && echo "note: reboot for the status LEDs (LED1 copies the onboard LEDs)"
 exit $status

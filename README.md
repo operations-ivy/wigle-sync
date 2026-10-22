@@ -98,6 +98,13 @@ with `wlan_host`, and with it off the dongle is always `hci0`. `bootstrap.sh`
 unblocks the adapter if it comes up soft-blocked, and checks that `hci0` is the
 USB one (`btusb`); `pi_bt_dongle` says the same on the brick69 dashboard.
 
+Three DIYables RGB LED modules sit on the header, stacked LED1 (top) to LED3.
+LED1 copies the onboard LEDs, which the case hides: red while powered, green
+on SD card activity (with red off for that moment), from two kernel `gpio-led`
+overlays (`actpwr` and `mmc0` triggers) that `bootstrap.sh` adds to
+`config.txt`. Its R/G/B legs are GPIO 16/20/21. LED2 and LED3 (R/G/B on GPIO
+17/27/22 and 5/6/13) have no job yet and are held low from boot.
+
 There's no phone AP any more (it was an RTL8188EUS running hostapd, retired
 2026-10-15 for the dongle's USB slot), so Kismet's UI isn't reachable on the
 road; at home it's on the home Wi-Fi at port 2501. `bootstrap.sh` removes what
