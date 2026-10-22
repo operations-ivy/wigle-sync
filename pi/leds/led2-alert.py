@@ -30,7 +30,7 @@ from detect import kind_of
 KISMET = "http://127.0.0.1:2501"
 WINDOW = 60  # seconds a device counts as near after Kismet last heard it
 POLL = 3  # seconds between asks
-FLASH = 0.1  # seconds per colour: red, white, red, ...
+FLASH = 1.0  # seconds per colour: red, white, red, ...
 BREATH = 4.0  # seconds per green fade in and out
 STEP = 0.03  # seconds between brightness changes while breathing
 ALERT_KINDS = {"flock", "axon"}
