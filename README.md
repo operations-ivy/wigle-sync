@@ -106,10 +106,10 @@ Three DIYables RGB LED modules sit on the header, stacked LED1 (top) to LED3;
 | LED | Shows | R/G/B pins (BCM) |
 | --- | --- | --- |
 | LED1 | The onboard LEDs, which the case hides: red while powered, green on SD activity (red off for that moment). Kernel `gpio-led` overlays with the `actpwr` and `mmc0` triggers. | 16/20/21 |
-| LED2 | Red and white, a second each, while Kismet heard a Flock camera or an Axon device in the last minute (`detect.py`'s rules); breathing green otherwise, including at home with Kismet stopped. `led2-alert.service`; green fades on the kernel's software PWM (`pwm-gpio` overlay). | 5/6/13 |
-| LED3 | Nothing yet; held low from boot. | 17/27/22 |
+| LED2 | Red and white, a second each, while Kismet heard a Flock camera or an Axon device in the last minute (`detect.py`'s rules); breathing green otherwise, including at home with Kismet stopped. Green fades on the kernel's software PWM (`pwm-gpio` overlay). | 5/6/13 |
+| LED3 | Breathing purple, with a short blink for each device Kismet hears for the first time: red for a Wi-Fi access point, blue for Bluetooth. At most 8 blinks per 3 seconds, so a busy street is a steady flicker rather than a backlog. Red and blue fade on software PWM too. | 17/27/22 |
 
-`led2-alert` asks Kismet's REST API every 3 seconds. Kismet's web login is
+LED2 and LED3 are `status-leds.service`, asking Kismet's REST API every 3 seconds. Kismet's web login is
 set by the setup script to a random password, kept only on the Pi in
 `~/.kismet/kismet_httpd.conf` (user `wigle`); before that, whoever reached
 port 2501 first could choose it.

@@ -1,9 +1,9 @@
 [Unit]
-Description=LED2: red and white near a Flock camera or Axon device, else breathing green (led2-alert.py)
+Description=LED2 (Flock and Axon alert) and LED3 (new devices) from Kismet (status-leds.py)
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/python3 /usr/local/lib/wigle-leds/led2-alert.py
+ExecStart=/usr/bin/python3 /usr/local/lib/wigle-leds/status-leds.py
 LoadCredential=kismet-httpd:/home/zaphod/.kismet/kismet_httpd.conf
 # Root for the PWM's sysfs files; everything else read-only.
 ProtectSystem=strict
