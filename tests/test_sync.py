@@ -10,6 +10,7 @@ from sync import has_observations
 from sync import pi_is_online
 from sync import recover_kismet_db
 from sync import run
+from sync import span_attributes
 from sync import sync_file
 from config import Settings
 from pi_client import RemoteFile
@@ -112,3 +113,14 @@ def test_wiglecsv_is_still_uploaded(tmp_path):
     wigle.upload.assert_called_once()
     pi.archive.assert_called_once_with(remote)
     assert (stats.uploaded, stats.archived_kept) == (1, 0)
+
+
+def test_span_attributes_are_plain_values():
+    # A span drops a Counter with a warning ("Invalid type Counter"), as the
+    # 0.1.9 trial showed: detections go one attribute per kind instead.
+    stats = RunStats(uploaded=2)
+    stats.detections.update({"flock": 3})
+    attrs = span_attributes(stats)
+    assert attrs["sync.uploaded"] == 2 and attrs["sync.detections.flock"] == 3
+    assert "sync.detections" not in attrs
+    assert all(isinstance(v, (bool, str, bytes, int, float)) for v in attrs.values())

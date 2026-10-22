@@ -15,6 +15,7 @@ from opentelemetry import trace
 from opentelemetry.trace import Status
 from opentelemetry.trace import StatusCode
 
+import detect
 from config import Settings
 from observability import BYTES_TOTAL
 from observability import init_logging
@@ -101,6 +102,14 @@ def sync_file(pi: PiClient, wigle: WigleClient, remote_file: RemoteFile, setting
                 pi.archive(remote_file)
             stats.archived_empty += 1
             return
+
+        with tracer.start_as_current_span("detect"):
+            found = detect.scan(local_path)
+        if found:
+            # Counts only: no addresses, names or places (detect.py).
+            stats.detections.update(found)
+            log.info("Surveillance devices on this drive", file=remote_file.name, **found)
+        span.set_attribute("detect.alerting", sum(detect.alerting(found).values()))
 
         if settings.compress:
             with tracer.start_as_current_span("compress"):
@@ -201,6 +210,14 @@ def seed_totals(settings: Settings, dry_run: bool = False) -> int:
     return 0
 
 
+def span_attributes(stats: RunStats) -> dict:
+    """The run's stats as span attributes: a span takes only plain values,
+    so detections become one attribute per kind found."""
+    out = {f"sync.{k}": v for k, v in vars(stats).items() if k != "detections"}
+    out.update({f"sync.detections.{k}": n for k, n in stats.detections.items()})
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Sync wardriving logs from the Pi to WiGLE")
     parser.add_argument("--dry-run", action="store_true", help="list what would be uploaded without uploading")
@@ -237,12 +254,11 @@ def main() -> int:
                 span.record_exception(e)
                 span.set_status(Status(StatusCode.ERROR))
                 log.exception("Sync run failed")
-            for key, value in vars(stats).items():
-                span.set_attribute(f"sync.{key}", value)
+            span.set_attributes(span_attributes(stats))
             if not stats.succeeded:
                 span.set_status(Status(StatusCode.ERROR))
         stats.duration_seconds = time.monotonic() - started
-        log.info("Sync complete", **vars(stats))
+        log.info("Sync complete", **{**vars(stats), "detections": dict(stats.detections)})
         if not args.dry_run:
             push_metrics(stats, finished_at=time.time())
     finally:

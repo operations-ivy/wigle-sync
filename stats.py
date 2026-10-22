@@ -13,8 +13,10 @@ from typing import Any
 import requests
 import structlog
 
-from sync import pi_is_online
 import console_metrics
+import detect
+from observability import DETECTIONS
+from sync import pi_is_online
 from wigle_client import WIGLE_API_URL
 
 log = structlog.get_logger()
@@ -152,10 +154,24 @@ def schedule() -> dict[str, Any]:
 
 
 def last_run() -> dict[str, Any]:
-    v = _prom_values('{__name__=~"wigle_sync_.+"}')
+    # Labelled series would collapse into one value by name: detections() reads those.
+    v = _prom_values(f'{{__name__=~"wigle_sync_.+", __name__!="{DETECTIONS}"}}')
     if not v:
         return {"error": "no wigle_sync metrics in Prometheus yet"}
     return {k.removeprefix("wigle_sync_"): val for k, val in v.items()}
+
+
+def detections() -> dict[str, Any]:
+    """Surveillance and tracking devices on the drives the last sync with the
+    Pi brought in, by kind (detect.py): counts only."""
+    found = {}
+    for r in _prom(DETECTIONS):
+        kind = r["metric"].get("kind")
+        if kind in detect.KINDS:
+            k = detect.KINDS[kind]
+            found[kind] = {"label": k.label, "confidence": k.confidence, "count": int(float(r["value"][1]))}
+    alerting = sum(v["count"] for v in found.values() if v["confidence"] != "low")
+    return {"kinds": found, "alerting": alerting}
 
 
 def pi() -> dict[str, Any]:
@@ -288,6 +304,7 @@ def collect() -> dict[str, Any]:
             "pi": _section("pi", pi),
             "history": _section("history", history),
             "errors": _section("errors", errors),
+            "detections": _section("detections", detections),
             "wigle": _section("wigle", wigle),
         }
 

@@ -28,6 +28,6 @@ COPY --from=deps /venv /venv
 ENV VIRTUAL_ENV=/venv PATH=/venv/bin:$PATH PYTHONPATH=/code
 WORKDIR /code
 
-COPY config.py observability.py pi_client.py wigle_client.py sync.py /code/
+COPY config.py detect.py observability.py pi_client.py wigle_client.py sync.py /code/
 
 ENTRYPOINT ["python", "sync.py"]

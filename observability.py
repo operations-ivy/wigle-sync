@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 import os
+from collections import Counter
 from dataclasses import dataclass
+from dataclasses import field
 
 import requests
 import structlog
@@ -17,7 +19,10 @@ from prometheus_client import Gauge
 from prometheus_client import pushadd_to_gateway
 from prometheus_client.parser import text_string_to_metric_families
 
+import detect
+
 SERVICE_NAME = "wigle-sync"
+DETECTIONS = "wigle_sync_last_sync_detections"
 # Running totals across every run. The Pushgateway keeps them on a persistent
 # volume, so each run that uploads reads them back and pushes them increased.
 UPLOADED_TOTAL = "wigle_sync_files_uploaded_since_launch"
@@ -84,6 +89,8 @@ class RunStats:
     deferred: int = 0
     bytes_uploaded: int = 0
     duration_seconds: float = 0.0
+    # Surveillance and tracking devices on the drives synced this run, by kind (detect.py).
+    detections: Counter = field(default_factory=Counter)
 
     @property
     def succeeded(self) -> bool:
@@ -140,8 +147,11 @@ def push_metrics(stats: RunStats, finished_at: float) -> None:
     gauge("files_found", "Capture files ready on the Pi in the last run", stats.files_found)
     gauge("files_uploaded", "Files uploaded to WiGLE in the last run", stats.uploaded)
     gauge("files_archived_empty", "Empty files archived without upload in the last run", stats.archived_empty)
-    gauge("files_archived_kept", "Files archived on the Pi without upload (not an upload format) in the last run",
-          stats.archived_kept)
+    gauge(
+        "files_archived_kept",
+        "Files archived on the Pi without upload (not an upload format) in the last run",
+        stats.archived_kept,
+    )
     gauge("files_failed", "Files that failed to sync in the last run", stats.failed)
     gauge("files_deferred", "Files left on the Pi in the last run because WiGLE was unreachable", stats.deferred)
     gauge("bytes_uploaded", "Bytes (post-compression) uploaded to WiGLE in the last run", stats.bytes_uploaded)
@@ -152,6 +162,17 @@ def push_metrics(stats: RunStats, finished_at: float) -> None:
         gauge("last_sync_bytes_uploaded", "Bytes uploaded by the last run that found the Pi", stats.bytes_uploaded)
         gauge("last_sync_files_failed", "Files that failed in the last run that found the Pi", stats.failed)
         gauge("last_sync_files_deferred", "Files deferred in the last run that found the Pi", stats.deferred)
+    if stats.pi_online:
+        # Every kind, 0 included, so a kind not seen this time reads 0, not its old count.
+        detections = Gauge(
+            DETECTIONS,
+            "Surveillance and tracking devices on the drives the last run that found "
+            "the Pi synced, by kind (detect.py)",
+            ["kind", "confidence"],
+            registry=registry,
+        )
+        for kind in detect.KINDS.values():
+            detections.labels(kind.key, kind.confidence).set(stats.detections.get(kind.key, 0))
     if stats.pi_online and stats.succeeded and not stats.deferred:
         gauge("last_success_timestamp_seconds", "When a sync with the Pi last completed cleanly", finished_at)
     if stats.uploaded:

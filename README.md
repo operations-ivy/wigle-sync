@@ -13,6 +13,7 @@ Each run is a one-shot sync, designed to run as a Kubernetes `CronJob`:
 - **Upload fails**: the file stays in place on the Pi, is retried next run, and the job exits 1.
 - **Only `.wiglecsv` is uploaded** (`UPLOAD_EXTENSIONS`). Until 2026-10-10 the `.kismet` databases were uploaded too, tar.gz'd, and WiGLE recorded zero networks from every one (57 in a row, some over 100 MB); the same session's `.wiglecsv` already carries every network. The `.kismet` files (with any `-journal`) are archived on the Pi as a local record and counted as `files_archived_kept`.
 - **Empty sessions**: header-only `.wiglecsv` and 0-byte files are archived without uploading.
+- **Surveillance and tracking devices** (`detect.py`, #35): before upload, each `.wiglecsv` is checked for Flock ALPR cameras (SSID `Flock-` + serial, medium), Axon devices (Axon's IEEE OUI in a globally administered address, high), Flipper Zeros (Bluetooth name, high) and Bluetooth serial modules as used in card skimmers (low: logged, never alerted). Only counts per kind leave it: a "Surveillance devices on this drive" log line, `wigle_sync_last_sync_detections{kind,confidence}` on the Pushgateway, and wigle-console's `/api/status` `detections`. Trackers (AirTags, SmartTags, Tile) need the advert data only the `.kismet` has, which isn't downloaded; that's a later step.
 - **Compression**: files are tar.gz'd before upload (WiGLE's limit is 180 MiB).
 
 ## Architecture
