@@ -118,6 +118,7 @@ systemctl start wifi-regdomain.service
 
 bash "$SRC/setup-kismet-size-watch.sh"
 bash "$SRC/metrics/setup-metrics.sh"
+bash "$SRC/leds/setup-leds.sh"
 if [[ -n ${WIGLE_SYNC_PUBKEY:-} ]]; then
     bash "$SRC/setup-pi-user.sh" "$WIGLE_SYNC_PUBKEY"
 else

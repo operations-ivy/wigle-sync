@@ -1,0 +1,17 @@
+[Unit]
+Description=LED2 (Flock and Axon alert) and LED3 (new devices) from Kismet (status-leds.py)
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/lib/wigle-leds/status-leds.py
+LoadCredential=kismet-httpd:/home/zaphod/.kismet/kismet_httpd.conf
+# Root for the PWM's sysfs files; everything else read-only.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -98,6 +98,22 @@ with `wlan_host`, and with it off the dongle is always `hci0`. `bootstrap.sh`
 unblocks the adapter if it comes up soft-blocked, and checks that `hci0` is the
 USB one (`btusb`); `pi_bt_dongle` says the same on the brick69 dashboard.
 
+### Status LEDs
+
+Three DIYables RGB LED modules sit on the header, stacked LED1 (top) to LED3;
+`pi/leds/setup-leds.sh` (run by `bootstrap.sh`) sets them up.
+
+| LED | Shows | R/G/B pins (BCM) |
+| --- | --- | --- |
+| LED1 | The onboard LEDs, which the case hides: red while powered, green on SD activity (red off for that moment). Kernel `gpio-led` overlays with the `actpwr` and `mmc0` triggers. | 16/20/21 |
+| LED2 | Red and white, a second each, while Kismet heard a Flock camera or an Axon device in the last minute (`detect.py`'s rules); breathing green otherwise, including at home with Kismet stopped. Green fades on the kernel's software PWM (`pwm-gpio` overlay). | 5/6/13 |
+| LED3 | Breathing purple, with a short blink for each device Kismet hears for the first time: red for a Wi-Fi access point, blue for Bluetooth. At most 8 blinks per 3 seconds, so a busy street is a steady flicker rather than a backlog. Red and blue fade on software PWM too. | 17/27/22 |
+
+LED2 and LED3 are `status-leds.service`, asking Kismet's REST API every 3 seconds. Kismet's web login is
+set by the setup script to a random password, kept only on the Pi in
+`~/.kismet/kismet_httpd.conf` (user `wigle`); before that, whoever reached
+port 2501 first could choose it.
+
 There's no phone AP any more (it was an RTL8188EUS running hostapd, retired
 2026-10-15 for the dongle's USB slot), so Kismet's UI isn't reachable on the
 road; at home it's on the home Wi-Fi at port 2501. `bootstrap.sh` removes what
