@@ -14,13 +14,17 @@
 # - chrony instead of systemd-timesyncd, with gpsd's GPS time as a fallback
 #   source, so samples (and Kismet's logs) taken away from the internet carry
 #   the right time. gpsd runs with -n so it reads the GPS with no client.
+# - fake-hwclock: there's no RTC, so a boot starts on the time it saved at
+#   shutdown (and hourly) rather than whenever systemd last noted it.
+#   wait-for-clock.service (rootfs) then holds Kismet back, up to 3 minutes,
+#   until chrony has the real time.
 set -euo pipefail
 
 SRC="$(cd "$(dirname "$0")" && pwd)"
 [[ $EUID -eq 0 ]] || { echo "run as root" >&2; exit 1; }
 export DEBIAN_FRONTEND=noninteractive
 
-apt-get install -y -q --no-install-recommends prometheus-node-exporter prometheus chrony python3
+apt-get install -y -q --no-install-recommends prometheus-node-exporter prometheus chrony fake-hwclock python3
 systemctl disable --now systemd-timesyncd.service 2>/dev/null || true
 
 # Time: GPS as a fallback source.
@@ -29,8 +33,9 @@ if ! grep -q '^GPSD_OPTIONS=.*-n' /etc/default/gpsd; then
     sed -i 's/^GPSD_OPTIONS="\(.*\)"/GPSD_OPTIONS="-n \1"/; s/-n "/-n"/' /etc/default/gpsd
     systemctl restart gpsd.service 2>/dev/null || true
 fi
-systemctl enable chrony.service
+systemctl enable chrony.service fake-hwclock.service
 systemctl restart chrony.service
+fake-hwclock save
 
 # node-exporter: localhost only, textfile directory on tmpfs.
 echo 'd /run/node-exporter-textfile 0755 root root -' > /etc/tmpfiles.d/node-exporter-textfile.conf

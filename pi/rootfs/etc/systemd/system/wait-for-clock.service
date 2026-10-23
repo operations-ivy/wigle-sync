@@ -1,0 +1,11 @@
+[Unit]
+Description=Wait up to 3 minutes for the real time before Kismet starts (no RTC)
+After=chrony.service gpsd.service
+Wants=chrony.service
+Before=kismet.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/wait-for-clock
+RemainAfterExit=yes
+TimeoutStartSec=210

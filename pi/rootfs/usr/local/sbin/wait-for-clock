@@ -1,0 +1,33 @@
+#!/bin/sh
+# Run once at boot, before Kismet (wait-for-clock.service). The Pi has no RTC,
+# so it boots on the time fake-hwclock saved before it was switched off; this
+# waits for chrony to set the real time (the internet at home, the GPS away)
+# so Kismet's sessions are named and timestamped right. With neither (no
+# Wi-Fi, no sky) it gives up after LIMIT seconds and Kismet starts anyway:
+# without a GPS fix it couldn't place what it hears then either.
+# How long it waited goes to node-exporter's textfile collector.
+LIMIT=${LIMIT:-180}
+OUT=${OUT:-/run/node-exporter-textfile/clock.prom}
+CHRONYC=${CHRONYC:-chronyc}
+
+# /proc/uptime, not the clock: the clock jumps when chrony sets it.
+start=$(cut -d' ' -f1 /proc/uptime)
+if "$CHRONYC" -h 127.0.0.1,::1 waitsync "$LIMIT" 1 0 1 >/dev/null; then
+    synced=1
+else
+    synced=0
+fi
+end=$(cut -d' ' -f1 /proc/uptime)
+waited=$(awk -v a="$start" -v b="$end" 'BEGIN { printf "%.0f", b - a }')
+
+mkdir -p "$(dirname "$OUT")"
+{
+    echo "# HELP pi_clock_wait_seconds How long Kismet waited at boot for chrony to set the clock."
+    echo "# TYPE pi_clock_wait_seconds gauge"
+    echo "pi_clock_wait_seconds $waited"
+    echo "# HELP pi_clock_synced_at_boot 1 if chrony set the clock within the limit, 0 if Kismet started on the saved time."
+    echo "# TYPE pi_clock_synced_at_boot gauge"
+    echo "pi_clock_synced_at_boot $synced"
+} > "$OUT.tmp" && mv "$OUT.tmp" "$OUT"
+echo "clock: synced=$synced after ${waited}s (limit ${LIMIT}s)"
+exit 0
