@@ -22,7 +22,12 @@ per pin (none of them has hardware PWM), so they mix into yellow and orange;
 LED2 is plain on and off, and LED3's blue is unused.
 
 Kismet's login comes from systemd (LoadCredential=kismet-httpd, Kismet's own
-kismet_httpd.conf). Nothing is logged about what was heard beyond the kind."""
+kismet_httpd.conf). Nothing is logged about what was heard beyond the kind.
+
+`sudo python3 status-leds.py --test` shows every state for a few seconds
+each (LED3 green, yellow, orange, red, then LED2's alert), to check the
+colours on the real LEDs: it stops status-leds.service while it runs and
+starts it again after."""
 
 from __future__ import annotations
 
@@ -30,6 +35,8 @@ import base64
 import collections
 import json
 import os
+import subprocess
+import sys
 import time
 import urllib.parse
 import urllib.request
@@ -42,6 +49,7 @@ WINDOW = 60  # seconds a device counts as near after Kismet last heard it
 POLL = 3  # seconds between asks
 FLASH = 1.0  # seconds per colour in LED2's alert (red, white, ...) and LED3's red
 STEP = 0.03  # seconds per tick
+TEST_HOLD = 5.0  # seconds per state in --test
 THERMAL = Path("/sys/class/thermal/thermal_zone0/temp")  # millidegrees C
 AVERAGE = 300  # seconds of readings in the average
 WARM = 55.0  # °C, average: yellow
@@ -146,18 +154,64 @@ def recent_devices(user: str, password: str) -> list[dict]:
         return json.load(resp)
 
 
-def main() -> None:
-    import gpiod
-    from gpiod.line import Direction, Value
+class Leds:
+    """LED2's pins (plain on and off) and LED3's red and green (faders)."""
 
-    on, off = Value.ACTIVE, Value.INACTIVE
-    pins = (LED2_RED, LED2_GREEN, LED2_BLUE, LED3_BLUE)
-    lines = gpiod.request_lines(
-        CHIP,
-        consumer="status-leds",
-        config={pins: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=off)},
-    )
-    red3, green3 = (Fader(pwm_chip(pin)) for pin in (LED3_RED, LED3_GREEN))
+    def __init__(self):
+        import gpiod
+        from gpiod.line import Direction, Value
+
+        self.on, self.off = Value.ACTIVE, Value.INACTIVE
+        pins = (LED2_RED, LED2_GREEN, LED2_BLUE, LED3_BLUE)
+        self.lines = gpiod.request_lines(
+            CHIP,
+            consumer="status-leds",
+            config={pins: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=self.off)},
+        )
+        self.red3, self.green3 = (Fader(pwm_chip(pin)) for pin in (LED3_RED, LED3_GREEN))
+
+    def show(self, near: bool, level: str | None, now: float) -> None:
+        """LED2's alert if near, LED3 in level's colour (off for None)."""
+        on, off = self.on, self.off
+        flash = int(now / FLASH) % 2 == 1
+        if near:
+            white = on if flash else off
+            self.lines.set_values({LED2_RED: on, LED2_GREEN: white, LED2_BLUE: white, LED3_BLUE: off})
+        else:
+            self.lines.set_values({LED2_RED: off, LED2_GREEN: off, LED2_BLUE: off, LED3_BLUE: off})
+        red, green = COLOURS[level] if level else (0.0, 0.0)
+        if level == "red" and flash:
+            red = 0.0
+        self.red3.set(red)
+        self.green3.set(green)
+
+
+def demo_states() -> list[tuple[str, bool, str | None]]:
+    """What --test shows, in order: (label, LED2 alerting, LED3 level)."""
+    return [(f"LED3 {level}", False, level) for level in LEVELS] + [("LED2 alert", True, None)]
+
+
+def run_test() -> None:
+    service = "status-leds.service"
+    was_running = subprocess.run(["systemctl", "is-active", "-q", service]).returncode == 0
+    if was_running:
+        subprocess.run(["systemctl", "stop", service], check=True)
+    try:
+        leds = Leds()
+        for label, near, level in demo_states():
+            print(label, flush=True)
+            end = time.monotonic() + TEST_HOLD
+            while (now := time.monotonic()) < end:
+                leds.show(near, level, now)
+                time.sleep(STEP)
+        leds.show(False, None, time.monotonic())
+    finally:
+        if was_running:
+            subprocess.run(["systemctl", "start", service], check=True)
+
+
+def main() -> None:
+    leds = Leds()
     user, password = credentials(Path(os.environ["CREDENTIALS_DIRECTORY"]) / "kismet-httpd")
     near, kismet_up = set(), None
     readings: collections.deque[float] = collections.deque(maxlen=AVERAGE // POLL)
@@ -187,20 +241,12 @@ def main() -> None:
                 if new != level:
                     print(f"heat: {new} ({temperature:.1f} °C, average {average:.1f} °C)", flush=True)
                     level = new
-
-        flash = int(now / FLASH) % 2 == 1
-        if near:
-            white = on if flash else off
-            lines.set_values({LED2_RED: on, LED2_GREEN: white, LED2_BLUE: white, LED3_BLUE: off})
-        else:
-            lines.set_values({LED2_RED: off, LED2_GREEN: off, LED2_BLUE: off, LED3_BLUE: off})
-        red, green = COLOURS[level] if level else (0.0, 0.0)
-        if level == "red" and flash:
-            red = 0.0
-        red3.set(red)
-        green3.set(green)
+        leds.show(bool(near), level, now)
         time.sleep(STEP)
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ["--test"]:
+        run_test()
+    else:
+        main()

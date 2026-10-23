@@ -109,7 +109,7 @@ Three DIYables RGB LED modules sit on the header, stacked LED1 (top) to LED3;
 | LED2 | Red and white, a second each, while Kismet heard a Flock camera or an Axon device in the last minute (`detect.py`'s rules); off otherwise, including at home with Kismet stopped. | 5/6/13 |
 | LED3 | How hot the Pi is: **green** cool (as after a boot), **yellow** warm (5-minute average 55 °C or more), **orange** running hot (average 65 °C or more; a brief dip doesn't clear it), **flashing red** at 75 °C or more right now, close to the firmware's hard throttle at 80 °C. A Pi 3B+ slows its CPU from 60 °C. A level clears 2 °C under its threshold. Red and green mix on the kernel's software PWM (`pwm-gpio` overlays); blue is unused. | 17/27/22 |
 
-LED2 and LED3 are `status-leds.service`, asking Kismet's REST API and reading the temperature every 3 seconds. Kismet's web login is
+LED2 and LED3 are `status-leds.service`, asking Kismet's REST API and reading the temperature every 3 seconds. To check the colours on the LEDs themselves, `sudo python3 /usr/local/lib/wigle-leds/status-leds.py --test` shows LED3 green, yellow, orange and red, then LED2's alert, 5 seconds each (it stops the service while it runs and starts it again). Kismet's web login is
 set by the setup script to a random password, kept only on the Pi in
 `~/.kismet/kismet_httpd.conf` (user `wigle`); before that, whoever reached
 port 2501 first could choose it.

@@ -122,3 +122,10 @@ def test_read_temperature(tmp_path):
 
 def test_every_level_has_a_colour():
     assert set(leds.COLOURS) == set(leds.LEVELS)
+
+
+def test_demo_shows_every_level_then_the_alert():
+    states = leds.demo_states()
+    assert [level for _, _, level in states[:-1]] == list(leds.LEVELS)
+    assert not any(near for _, near, _ in states[:-1])
+    assert states[-1] == ("LED2 alert", True, None)

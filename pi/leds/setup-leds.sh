@@ -25,6 +25,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get install -y -q --no-install-recommends python3 python3-libgpiod openssl
 
 config=/boot/firmware/config.txt
+marker="# wigle-sync: RGB status LEDs (pi/leds/setup-leds.sh)"
 led_lines=(
     "dtoverlay=gpio-led,gpio=16,label=led1-red,trigger=actpwr"
     "dtoverlay=gpio-led,gpio=20,label=led1-green,trigger=mmc0"
@@ -40,14 +41,19 @@ old_lines=(
     "dtoverlay=pwm-gpio,gpio=22"
 )
 if [[ -f $config ]]; then
+    # The old lines go with their comments (tidy-config.awk).
     for line in "${old_lines[@]}"; do
         grep -qxF "$line" "$config" || continue
-        sed -i "/^$line\$/d" "$config"
-        echo "removed from $config: $line"
+        echo "removing from $config: $line"
     done
+    tidy=$(OLD="$(printf '%s\n' "${old_lines[@]}")" awk -v MARK="$marker" -f "$SRC/tidy-config.awk" "$config")
+    if [[ $tidy != "$(cat "$config")" ]]; then
+        printf '%s\n' "$tidy" > "$config"
+        echo "tidied $config"
+    fi
     for line in "${led_lines[@]}"; do
         grep -qxF "$line" "$config" && continue
-        printf '# wigle-sync: RGB status LEDs (pi/leds/setup-leds.sh)\n%s\n' "$line" >> "$config"
+        printf '%s\n%s\n' "$marker" "$line" >> "$config"
         echo "added to $config: $line"
         echo "note: reboot for the status LEDs"
     done
