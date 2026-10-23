@@ -1,4 +1,4 @@
-"""pi/leds/status-leds.py's matching, new-device blinks and breathing (loaded by path: the script
+"""pi/leds/status-leds.py's matching and heat levels (loaded by path: the script
 has a dash in its name and imports detect from beside it)."""
 
 from __future__ import annotations
@@ -51,23 +51,14 @@ def test_credentials(tmp_path):
     assert leds.credentials(conf) == ("wigle", "abc=def")
 
 
-def test_breath_rises_and_falls():
-    b = leds.BREATH
-    assert leds.breath(0) == 0
-    assert leds.breath(b / 2) == 1
-    assert 0 < leds.breath(b / 4) < 1
-    assert abs(leds.breath(b / 4) - leds.breath(3 * b / 4)) < 1e-9
-    assert leds.breath(b) == 0
-
-
 def test_pwm_chip_found_by_pin(tmp_path):
-    for n, pin in enumerate((6, 17, 22)):
+    for n, pin in enumerate((17, 27)):
         dev = tmp_path / "devices" / f"pwm_gpio@{pin:x}"
         dev.mkdir(parents=True)
         (tmp_path / f"pwmchip{n}").mkdir()
         (tmp_path / f"pwmchip{n}" / "device").symlink_to(dev)
-    assert leds.pwm_chip(17, tmp_path) == tmp_path / "pwmchip1"
-    assert leds.pwm_chip(22, tmp_path) == tmp_path / "pwmchip2"
+    assert leds.pwm_chip(17, tmp_path) == tmp_path / "pwmchip0"
+    assert leds.pwm_chip(27, tmp_path) == tmp_path / "pwmchip1"
 
 
 def test_pwm_chip_missing(tmp_path):
@@ -94,26 +85,40 @@ def test_fader_writes_duty_only_on_change(tmp_path):
     assert (pwm / "duty_cycle").read_text() == str(leds.PERIOD)
 
 
-def test_new_devices_counts_aps_and_bluetooth_once():
-    seen = set()
-    first = [device("AA:00:00:00:00:01", "Net"), device("AA:00:00:00:00:02", "", type_="Wi-Fi Client"), device("AA:00:00:00:00:03", "", "Bluetooth", "BTLE")]
-    assert leds.new_devices(first, seen) == (1, 1)
-    assert leds.new_devices(first + [device("AA:00:00:00:00:04", "Other")], seen) == (1, 0)
-    assert leds.new_devices(first, seen) == (0, 0)
+def test_heat_levels():
+    assert leds.heat_level(40, 40) == "green"
+    assert leds.heat_level(56, 55) == "yellow"
+    assert leds.heat_level(66, 65) == "orange"
+    assert leds.heat_level(75, 60) == "red"
 
 
-def test_blink_plan_alternates_and_spreads():
-    plan = leds.blink_plan(2, 1, 100.0)
-    assert [c for _, c in plan] == ["red", "blue", "red"]
-    assert [t for t, _ in plan] == [100.0, 101.0, 102.0]
+def test_orange_holds_through_a_brief_dip():
+    # The reading drops to normal, but the average is still hot.
+    assert leds.heat_level(50, 66, "orange") == "orange"
 
 
-def test_blink_plan_caps_a_burst():
-    plan = leds.blink_plan(50, 3, 0.0)
-    assert len(plan) == leds.MAX_BLINKS
-    assert [c for _, c in plan].count("blue") == 3
-    assert plan[-1][0] < leds.POLL
+def test_a_level_clears_only_under_its_hysteresis():
+    assert leds.heat_level(64, 64, "orange") == "orange"
+    assert leds.heat_level(62.9, 62.9, "orange") == "yellow"
+    assert leds.heat_level(73.5, 60, "red") == "red"
+    assert leds.heat_level(72.9, 60, "red") == "yellow"
+    assert leds.heat_level(54, 54, "yellow") == "yellow"
+    assert leds.heat_level(54, 54, "green") == "green"
 
 
-def test_blink_plan_nothing_new():
-    assert leds.blink_plan(0, 0, 5.0) == []
+def test_rising_uses_the_threshold_itself():
+    assert leds.heat_level(64, 64, "yellow") == "yellow"
+    assert leds.heat_level(74, 50, "green") == "green"
+
+
+def test_read_temperature(tmp_path):
+    zone = tmp_path / "temp"
+    zone.write_text("39704\n")
+    assert leds.read_temperature(zone) == 39.704
+    zone.write_text("")
+    assert leds.read_temperature(zone) is None
+    assert leds.read_temperature(tmp_path / "missing") is None
+
+
+def test_every_level_has_a_colour():
+    assert set(leds.COLOURS) == set(leds.LEVELS)

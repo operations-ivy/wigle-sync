@@ -9,13 +9,12 @@
 #   off during activity), green on SD activity (mmc0, like ACT). Kernel
 #   gpio-led overlays in config.txt; next boot.
 # - LED2 (middle) alternates red and white near a Flock camera or Axon device,
-#   and breathes green otherwise. Green fades on the kernel's software PWM
-#   (pwm-gpio overlay on GPIO6); next boot.
-# - LED3 (bottom) breathes purple, and blinks for each new device Kismet
-#   hears: red for an access point, blue for Bluetooth. Its red and blue fade
-#   on software PWM too (pwm-gpio on GPIO17 and 22).
+#   and is off otherwise.
+# - LED3 (bottom) shows the SoC's temperature: green, yellow, orange, flashing
+#   red. Its red and green mix on the kernel's software PWM (pwm-gpio overlays
+#   on GPIO17 and 27); next boot.
 # - LED2 and LED3 are status-leds.py, asking Kismet's REST API with a login
-#   only this Pi knows. Their pins are held low from boot so the default
+#   only this Pi knows. Their other pins are held low from boot so the default
 #   pull-up on GPIO5 doesn't light LED2 faintly before it starts.
 set -euo pipefail
 
@@ -29,13 +28,17 @@ config=/boot/firmware/config.txt
 led_lines=(
     "dtoverlay=gpio-led,gpio=16,label=led1-red,trigger=actpwr"
     "dtoverlay=gpio-led,gpio=20,label=led1-green,trigger=mmc0"
-    "dtoverlay=pwm-gpio,gpio=6"
     "dtoverlay=pwm-gpio,gpio=17"
-    "dtoverlay=pwm-gpio,gpio=22"
-    "gpio=5,13,21,27=op,dl"
+    "dtoverlay=pwm-gpio,gpio=27"
+    "gpio=5,6,13,21,22=op,dl"
 )
 # Lines earlier versions of this script added.
-old_lines=("gpio=5,13,17,21,22,27=op,dl")
+old_lines=(
+    "gpio=5,13,17,21,22,27=op,dl"
+    "gpio=5,13,21,27=op,dl"
+    "dtoverlay=pwm-gpio,gpio=6"
+    "dtoverlay=pwm-gpio,gpio=22"
+)
 if [[ -f $config ]]; then
     for line in "${old_lines[@]}"; do
         grep -qxF "$line" "$config" || continue

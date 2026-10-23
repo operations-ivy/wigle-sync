@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
-"""LED2 and LED3, from what Kismet hears (LED1 is the kernel's: setup-leds.sh).
+"""LED2 from what Kismet hears, LED3 from the SoC's temperature (LED1 is the
+kernel's: setup-leds.sh).
 
 - LED2 alternates red and white while Kismet heard a Flock ALPR camera or an
-  Axon device (body camera?) in the last WINDOW seconds, and breathes green
-  otherwise.
-- LED3 breathes purple, and blinks once for each device Kismet hears for the
-  first time: red for a Wi-Fi access point, blue for a Bluetooth device. A
-  busy street gives more than it can show, so each poll's blinks are capped
-  and spread out.
+  Axon device (body camera?) in the last WINDOW seconds, and is off otherwise.
+- LED3 shows how hot the Pi is: green when cool (as after a boot), yellow
+  when warm, orange when it has run hot for a while (the average, so a brief
+  dip doesn't turn it yellow), and flashing red close to the firmware's hard
+  throttle at 80 °C. A Pi 3B+ slows its CPU from 60 °C (its soft limit).
+  Each level needs HYSTERESIS degrees under its threshold to clear, so a
+  reading on the line doesn't flicker between two colours.
 
 Every few seconds this asks Kismet's REST API on localhost for the devices it
-heard in the last WINDOW seconds. Flock and Axon come from detect.py's rules
-(the same ones the sync counts drives with, so the two can't drift apart).
-When Kismet isn't running (at home it stops after 15 minutes) nothing is near
-and nothing is new: LED2 breathes green, LED3 purple, and this keeps asking.
+heard in the last WINDOW seconds, and reads the temperature. Flock and Axon
+come from detect.py's rules (the same ones the sync counts drives with, so the
+two can't drift apart). When Kismet isn't running (at home it stops after 15
+minutes) nothing is near, LED2 is off, and this keeps asking.
 
-The colours that fade (LED2's green, LED3's red and blue) are on the kernel's
-software PWM, one pwm-gpio overlay per pin (none of them has hardware PWM);
-LED2's red and blue are plain on and off, and LED3's green is unused.
+LED3's red and green are on the kernel's software PWM, one pwm-gpio overlay
+per pin (none of them has hardware PWM), so they mix into yellow and orange;
+LED2 is plain on and off, and LED3's blue is unused.
 
 Kismet's login comes from systemd (LoadCredential=kismet-httpd, Kismet's own
 kismet_httpd.conf). Nothing is logged about what was heard beyond the kind."""
@@ -25,6 +27,7 @@ kismet_httpd.conf). Nothing is logged about what was heard beyond the kind."""
 from __future__ import annotations
 
 import base64
+import collections
 import json
 import os
 import time
@@ -37,11 +40,17 @@ from detect import kind_of
 KISMET = "http://127.0.0.1:2501"
 WINDOW = 60  # seconds a device counts as near after Kismet last heard it
 POLL = 3  # seconds between asks
-FLASH = 1.0  # seconds per colour in LED2's alert: red, white, red, ...
-BREATH = 4.0  # seconds per green fade in and out
+FLASH = 1.0  # seconds per colour in LED2's alert (red, white, ...) and LED3's red
 STEP = 0.03  # seconds per tick
-BLINK = 0.12  # seconds LED3 is lit per new device
-MAX_BLINKS = 8  # per poll; the rest of a burst isn't shown
+THERMAL = Path("/sys/class/thermal/thermal_zone0/temp")  # millidegrees C
+AVERAGE = 300  # seconds of readings in the average
+WARM = 55.0  # °C, average: yellow
+HOT = 65.0  # °C, average: orange
+CRITICAL = 75.0  # °C, now: red (the firmware throttles hard at 80)
+HYSTERESIS = 2.0  # °C under a threshold before its level clears
+LEVELS = ("green", "yellow", "orange", "red")
+# LED3's red and green duty per level; the modules' green is the brighter.
+COLOURS = {"green": (0.0, 1.0), "yellow": (1.0, 0.5), "orange": (1.0, 0.15), "red": (1.0, 0.0)}
 ALERT_KINDS = {"flock", "axon"}
 CHIP = "/dev/gpiochip0"
 LED2_RED, LED2_GREEN, LED2_BLUE = 5, 6, 13
@@ -49,11 +58,9 @@ LED3_RED, LED3_GREEN, LED3_BLUE = 17, 27, 22
 PWM = Path("/sys/class/pwm")
 PERIOD = 10_000_000  # ns: 100 Hz
 FIELDS = [
-    "kismet.device.base.key",
     "kismet.device.base.macaddr",
     "kismet.device.base.commonname",
     "kismet.device.base.phyname",
-    "kismet.device.base.type",
 ]
 
 
@@ -78,42 +85,29 @@ def kinds_near(devices: list[dict]) -> set[str]:
     return found
 
 
-def new_devices(devices: list[dict], seen: set[str]) -> tuple[int, int]:
-    """Access points and Bluetooth devices not in seen (which this updates)."""
-    aps = bts = 0
-    for d in devices:
-        key = d.get("kismet.device.base.key")
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        if d.get("kismet.device.base.phyname") == "IEEE802.11":
-            aps += d.get("kismet.device.base.type") == "Wi-Fi AP"
-        else:
-            bts += 1
-    return aps, bts
+def heat_level(now: float, average: float, previous: str | None = None) -> str:
+    """LED3's level for the temperature now and its recent average (°C). A
+    level reached stays until its reading is HYSTERESIS under the threshold."""
+
+    def over(level: str, value: float, threshold: float) -> bool:
+        held = previous is not None and LEVELS.index(previous) >= LEVELS.index(level)
+        return value >= threshold - (HYSTERESIS if held else 0)
+
+    if over("red", now, CRITICAL):
+        return "red"
+    if over("orange", average, HOT):
+        return "orange"
+    if over("yellow", average, WARM):
+        return "yellow"
+    return "green"
 
 
-def blink_plan(aps: int, bts: int, start: float) -> list[tuple[float, str]]:
-    """When LED3 lights, and in which colour, for one poll's new devices: at
-    most MAX_BLINKS, alternating kinds while both last, spread over the poll."""
-    colours = []
-    while (aps or bts) and len(colours) < MAX_BLINKS:
-        if aps:
-            colours.append("red")
-            aps -= 1
-        if bts and len(colours) < MAX_BLINKS:
-            colours.append("blue")
-            bts -= 1
-    gap = POLL / max(len(colours), 1)
-    return [(start + i * gap, c) for i, c in enumerate(colours)]
-
-
-def breath(t: float) -> float:
-    """Green's brightness, 0 to 1, t seconds into the breathing: a smooth
-    rise and fall, squared because eyes see brightness roughly that way."""
-    phase = (t % BREATH) / BREATH
-    level = 1 - abs(2 * phase - 1)
-    return level * level
+def read_temperature(path: Path = THERMAL) -> float | None:
+    """The SoC's temperature in °C, or None if it can't be read."""
+    try:
+        return int(path.read_text()) / 1000
+    except (OSError, ValueError):
+        return None
 
 
 def pwm_chip(pin: int, root: Path = PWM) -> Path:
@@ -157,17 +151,17 @@ def main() -> None:
     from gpiod.line import Direction, Value
 
     on, off = Value.ACTIVE, Value.INACTIVE
-    pins = (LED2_RED, LED2_BLUE, LED3_GREEN)
+    pins = (LED2_RED, LED2_GREEN, LED2_BLUE, LED3_BLUE)
     lines = gpiod.request_lines(
         CHIP,
         consumer="status-leds",
         config={pins: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=off)},
     )
-    green2, red3, blue3 = (Fader(pwm_chip(pin)) for pin in (LED2_GREEN, LED3_RED, LED3_BLUE))
+    red3, green3 = (Fader(pwm_chip(pin)) for pin in (LED3_RED, LED3_GREEN))
     user, password = credentials(Path(os.environ["CREDENTIALS_DIRECTORY"]) / "kismet-httpd")
     near, kismet_up = set(), None
-    seen: set[str] | None = None  # None until Kismet first answers; that answer only fills it
-    blinks: list[tuple[float, str]] = []
+    readings: collections.deque[float] = collections.deque(maxlen=AVERAGE // POLL)
+    level: str | None = None
     next_poll = 0.0
     while True:
         now = time.monotonic()
@@ -185,26 +179,26 @@ def main() -> None:
             if found != near:
                 print(f"near: {', '.join(sorted(found)) or 'nothing'}", flush=True)
                 near = found
-            if up and seen is None:
-                seen = set()
-                new_devices(devices, seen)
-            elif up:
-                blinks = blink_plan(*new_devices(devices, seen), now)
+            temperature = read_temperature()
+            if temperature is not None:
+                readings.append(temperature)
+                average = sum(readings) / len(readings)
+                new = heat_level(temperature, average, level)
+                if new != level:
+                    print(f"heat: {new} ({temperature:.1f} °C, average {average:.1f} °C)", flush=True)
+                    level = new
 
+        flash = int(now / FLASH) % 2 == 1
         if near:
-            white = int(now / FLASH) % 2 == 1
-            lines.set_values({LED2_RED: on, LED2_BLUE: on if white else off, LED3_GREEN: off})
-            green2.set(1.0 if white else 0.0)
+            white = on if flash else off
+            lines.set_values({LED2_RED: on, LED2_GREEN: white, LED2_BLUE: white, LED3_BLUE: off})
         else:
-            lines.set_values({LED2_RED: off, LED2_BLUE: off, LED3_GREEN: off})
-            green2.set(breath(now))
-        lit = next((c for t, c in blinks if t <= now < t + BLINK), None)
-        if lit:
-            red3.set(1.0 if lit == "red" else 0.0)
-            blue3.set(1.0 if lit == "blue" else 0.0)
-        else:
-            red3.set(breath(now))
-            blue3.set(breath(now))
+            lines.set_values({LED2_RED: off, LED2_GREEN: off, LED2_BLUE: off, LED3_BLUE: off})
+        red, green = COLOURS[level] if level else (0.0, 0.0)
+        if level == "red" and flash:
+            red = 0.0
+        red3.set(red)
+        green3.set(green)
         time.sleep(STEP)
 
 
