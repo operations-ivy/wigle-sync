@@ -146,6 +146,8 @@ check "kismet bluetooth helper is privileged" helper_privileged /usr/bin/kismet_
 check "node-exporter answers on localhost" sh -c 'curl -fsS http://127.0.0.1:9100/metrics | grep -q "^pi_gps_fix_mode"'
 check "Prometheus agent running" systemctl is-active prometheus.service
 check "chrony running" systemctl is-active chrony.service
+check "fake-hwclock has a saved time" test -s /etc/fake-hwclock.data
+check "Kismet waits for the clock" sh -c 'systemctl show -p Wants kismet.service | grep -q wait-for-clock.service'
 check "gpsd sees a device" sh -c 'timeout 10 gpspipe -w -n 5 2>/dev/null | grep -q "\"class\":\"DEVICES\".*\"path\""'
 (( changed_links )) && echo "note: interface names changed; reboot to apply them"
 (( bt_reboot )) && echo "note: reboot to turn the onboard Bluetooth off (the dongle becomes hci0)"

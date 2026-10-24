@@ -300,4 +300,9 @@ down. Liveness stays on `/health`.
   to 24 hours) and arrive once it's home (the cluster's Prometheus accepts
   them up to 24 hours late). The Pi has no RTC, so **chrony** takes GPS
   time from gpsd (run with `-n`) when there's no internet, and those
-  samples carry the right time. The "brick69" dashboard draws it all.
+  samples carry the right time. **fake-hwclock** saves the time at shutdown
+  and hourly, so a boot starts near it, and **`wait-for-clock.service`**
+  holds Kismet back until chrony has the real time (about 10 s at home,
+  about a minute on the GPS with open sky), up to 3 minutes; then Kismet
+  starts anyway. How long it waited is `pi_clock_wait_seconds` (and
+  `pi_clock_synced_at_boot`). The "brick69" dashboard draws it all.
