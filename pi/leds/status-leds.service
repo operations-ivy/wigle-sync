@@ -1,5 +1,5 @@
 [Unit]
-Description=LED2 (Flock and Axon alert) and LED3 (new devices) from Kismet (status-leds.py)
+Description=LED2 (Flock and Axon alert, from Kismet) and LED3 (temperature) (status-leds.py)
 After=network.target
 
 [Service]
