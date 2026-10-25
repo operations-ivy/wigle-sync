@@ -12,12 +12,25 @@ from unittest import mock
 from urllib.parse import urlsplit
 
 import pytest
+import structlog
 
-KML = ("<kml><Document><Placemark><name>SecretNet</name><description>Network ID: AA:BB:CC:DD:EE:FF"
-       "&lt;br/&gt;Time: 2026-10-09T21:15:02.000-04:00&lt;br/&gt;Type: WIFI</description>"
-       "<Point><coordinates>-75.0,40.0</coordinates></Point></Placemark></Document></kml>")
-SYNC_LINE = json.dumps({"event": "Sync complete", "pi_online": True, "files_found": 2, "uploaded": 1,
-                        "archived_empty": 0, "archived_kept": 1, "failed": 0, "deferred": 0})
+KML = (
+    "<kml><Document><Placemark><name>SecretNet</name><description>Network ID: AA:BB:CC:DD:EE:FF"
+    "&lt;br/&gt;Time: 2026-10-09T21:15:02.000-04:00&lt;br/&gt;Type: WIFI</description>"
+    "<Point><coordinates>-75.0,40.0</coordinates></Point></Placemark></Document></kml>"
+)
+SYNC_LINE = json.dumps(
+    {
+        "event": "Sync complete",
+        "pi_online": True,
+        "files_found": 2,
+        "uploaded": 1,
+        "archived_empty": 0,
+        "archived_kept": 1,
+        "failed": 0,
+        "deferred": 0,
+    }
+)
 
 
 class Upstreams(BaseHTTPRequestHandler):
@@ -30,10 +43,15 @@ class Upstreams(BaseHTTPRequestHandler):
             return self.reply(200, KML.encode(), "application/vnd.google-earth.kml+xml")
         body = {
             "/api/v1/query": {"status": "success", "data": {"resultType": "vector", "result": []}},
-            "/loki/api/v1/query_range": {"data": {"result": [{"stream": {}, "values": [[str(time.time_ns()), SYNC_LINE]]}]}},
+            "/loki/api/v1/query_range": {
+                "data": {"result": [{"stream": {}, "values": [[str(time.time_ns()), SYNC_LINE]]}]}
+            },
             "/api/v2/stats/user": {"statistics": {"userName": "tester", "rank": 1}},
-            "/api/v2/file/transactions": {"results": [{"transid": "20261009-00001", "status": "D", "totalGps": 1,
-                                                       "fileName": "Kismet-1.wiglecsv.tar.gz"}]},
+            "/api/v2/file/transactions": {
+                "results": [
+                    {"transid": "20261009-00001", "status": "D", "totalGps": 1, "fileName": "Kismet-1.wiglecsv.tar.gz"}
+                ]
+            },
         }.get(path)
         self.reply(200 if body else 404, json.dumps(body or {}).encode())
 
@@ -53,17 +71,28 @@ def client():
     server = ThreadingHTTPServer(("127.0.0.1", 0), Upstreams)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_address[1]}"
-    env = {"WIGLE_API_NAME": "n", "WIGLE_API_TOKEN": "t", "PROMETHEUS_URL": base, "LOKI_URL": base,
-           "PI_HOST": "127.0.0.1", "PI_PORT": "1"}
+    env = {
+        "WIGLE_API_NAME": "n",
+        "WIGLE_API_TOKEN": "t",
+        "PROMETHEUS_URL": base,
+        "LOKI_URL": base,
+        "PI_HOST": "127.0.0.1",
+        "PI_PORT": "1",
+    }
     with mock.patch.dict(os.environ, env):
         import radar
         import stats
+
         # stats and radar bind WiGLE's URL at import; point both at the stub
         # before console starts their background threads.
-        with (mock.patch.object(radar, "WIGLE_API_URL", f"{base}/api/v2"),
-              mock.patch.object(stats, "WIGLE_API_URL", f"{base}/api/v2"),
-              mock.patch.object(stats, "PROMETHEUS_URL", base), mock.patch.object(stats, "LOKI_URL", base)):
+        with (
+            mock.patch.object(radar, "WIGLE_API_URL", f"{base}/api/v2"),
+            mock.patch.object(stats, "WIGLE_API_URL", f"{base}/api/v2"),
+            mock.patch.object(stats, "PROMETHEUS_URL", base),
+            mock.patch.object(stats, "LOKI_URL", base),
+        ):
             import console
+
             yield console.app.test_client()
     server.shutdown()
 
@@ -117,3 +146,13 @@ def test_metrics_count_requests_radar_and_wigle_without_names(client):
     assert 'wigle_console_radar_drives{layer="recent"} 1.0' in text
     assert "wigle_console_radar_contacts 1.0" in text
     assert "SecretNet" not in text and "AA:BB" not in text
+
+
+def test_console_logs_each_request_as_fields(client):
+    with structlog.testing.capture_logs() as logs:
+        client.get("/api/status")
+        client.get("/health")
+    requests = [e for e in logs if e["event"] == "request"]
+    # /health is a probe: logged at debug, so at the INFO level it never appears.
+    assert [(e["path"], e["status"], e["log_level"]) for e in requests] == [("/api/status", 200, "info")]
+    assert requests[0]["method"] == "GET" and requests[0]["duration_ms"] >= 0

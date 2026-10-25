@@ -4,6 +4,7 @@ After=network.target
 
 [Service]
 ExecStart=/usr/bin/python3 /usr/local/lib/wigle-leds/status-leds.py
+Environment=LOG_FORMAT=json
 LoadCredential=kismet-httpd:/home/zaphod/.kismet/kismet_httpd.conf
 # Root for the PWM's sysfs files; everything else read-only.
 ProtectSystem=strict
