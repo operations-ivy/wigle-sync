@@ -3,7 +3,7 @@
 # the driveway, waiting on a GPS fix before driving off, keeps kismet running).
 # Leaving home wifi cancels a pending stop, (re)starts kismet, and marks this
 # boot as a real outing so kismet-home-stop keeps its logs.
-DELAY=15min
+DELAY=900  # seconds
 UNIT=kismet-home-stop
 . /etc/default/kismet-pi
 [ "$1" = wlan_host ] || exit 0
@@ -14,7 +14,11 @@ case "$2" in
   up)
     systemctl stop "$UNIT.timer" 2>/dev/null || true
     systemctl reset-failed "$UNIT.service" 2>/dev/null || true
-    systemd-run --collect --unit="$UNIT" --on-active="$DELAY" /usr/local/sbin/kismet-home-stop
+    # Due at a time since boot, not --on-active: systemd re-arms a relative
+    # timer on every daemon-reload (an apt upgrade, bootstrap.sh), postponing
+    # the stop, and at boot the wall clock may still be hours behind.
+    up=$(cut -d. -f1 /proc/uptime)
+    systemd-run --collect --unit="$UNIT" --on-boot=$((up + DELAY)) /usr/local/sbin/kismet-home-stop
     ;;
   down)
     systemctl stop "$UNIT.timer" 2>/dev/null || true

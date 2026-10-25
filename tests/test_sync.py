@@ -11,6 +11,7 @@ from sync import pi_is_online
 from sync import recover_kismet_db
 from sync import run
 from sync import span_attributes
+from sync import stationary
 from sync import sync_file
 from config import Settings
 from pi_client import RemoteFile
@@ -85,10 +86,23 @@ def test_wigle_unreachable_defers_the_rest_of_the_run():
 
 
 def _settings(**over):
-    base = dict(wigle_api_name="n", wigle_api_token="t", wigle_donate=False, pi_host="pi", pi_port=22, pi_user="u",
-                pi_ssh_key_path="k", pi_known_hosts_path=None, pi_remote_dir="/r", pi_archive_dir="/r/uploaded",
-                pi_connect_timeout=1.0, pi_probe_timeout=1.0, min_file_age_seconds=300,
-                file_extensions=(".kismet", ".wiglecsv"), compress=False)
+    base = dict(
+        wigle_api_name="n",
+        wigle_api_token="t",
+        wigle_donate=False,
+        pi_host="pi",
+        pi_port=22,
+        pi_user="u",
+        pi_ssh_key_path="k",
+        pi_known_hosts_path=None,
+        pi_remote_dir="/r",
+        pi_archive_dir="/r/uploaded",
+        pi_connect_timeout=1.0,
+        pi_probe_timeout=1.0,
+        min_file_age_seconds=300,
+        file_extensions=(".kismet", ".wiglecsv"),
+        compress=False,
+    )
     return Settings(**{**base, **over})
 
 
@@ -124,3 +138,44 @@ def test_span_attributes_are_plain_values():
     assert attrs["sync.uploaded"] == 2 and attrs["sync.detections.flock"] == 3
     assert "sync.detections" not in attrs
     assert all(isinstance(v, (bool, str, bytes, int, float)) for v in attrs.values())
+
+
+def _wiglecsv(tmp_path, fixes, name="Kismet-1.wiglecsv"):
+    header = (
+        "WigleWifi-1.4,appRelease=Kismet\n"
+        "MAC,SSID,AuthMode,FirstSeen,Channel,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,Type\n"
+    )
+    rows = "".join(
+        f"aa:00:00:00:00:{i:02x},x,[ESS],2026-10-23 00:00:{i % 60:02d},6,-60,{lat},{lon},0,0,WIFI\n"
+        for i, (lat, lon) in enumerate(fixes)
+    )
+    path = tmp_path / name
+    path.write_text(header + rows)
+    return path
+
+
+def test_a_session_that_never_moved_is_stationary(tmp_path):
+    # GPS wandering indoors: tens of metres around one spot (made-up coordinates).
+    assert stationary(_wiglecsv(tmp_path, [(40.0, -75.0), (40.0003, -75.0004), (39.9998, -75.0002)]))
+
+
+def test_a_drive_is_not_stationary(tmp_path):
+    assert not stationary(_wiglecsv(tmp_path, [(40.0, -75.0), (40.0, -75.0), (40.01, -75.0)]))
+
+
+def test_no_fixes_is_not_judged(tmp_path):
+    assert not stationary(_wiglecsv(tmp_path, [(0.0, 0.0)]))
+    db = tmp_path / "Kismet-1.kismet"
+    db.write_bytes(b"SQLite format 3\0")
+    assert not stationary(db)
+
+
+def test_stationary_sessions_are_archived_without_upload(tmp_path):
+    csv = _wiglecsv(tmp_path, [(40.0, -75.0), (40.0001, -75.0001)])
+    pi, wigle, stats = mock.Mock(), mock.Mock(), RunStats()
+    pi.download.return_value = csv
+    remote = RemoteFile(csv.name, f"/r/{csv.name}", csv.stat().st_size, 0)
+    sync_file(pi, wigle, remote, _settings(), stats)
+    wigle.upload.assert_not_called()
+    pi.archive.assert_called_once_with(remote)
+    assert (stats.archived_stationary, stats.uploaded) == (1, 0)

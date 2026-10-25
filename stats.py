@@ -63,7 +63,9 @@ class _Cache:
             if hit:
                 if time.time() - hit[0] >= ttl and key not in self._refreshing:
                     self._refreshing.add(key)
-                    threading.Thread(target=self._refresh, args=(key, fn), name=f"cache-refresh-{key}", daemon=True).start()
+                    threading.Thread(
+                        target=self._refresh, args=(key, fn), name=f"cache-refresh-{key}", daemon=True
+                    ).start()
                 return hit[1]
         value = fn()
         with self._lock:
@@ -191,6 +193,7 @@ def history() -> dict[str, Any]:
         "files_found",
         "uploaded",
         "archived_empty",
+        "archived_stationary",
         "archived_kept",
         "failed",
         "deferred",
