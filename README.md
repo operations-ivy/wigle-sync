@@ -13,7 +13,7 @@ Each run is a one-shot sync, designed to run as a Kubernetes `CronJob`:
 - **Upload fails**: the file stays in place on the Pi, is retried next run, and the job exits 1.
 - **Only `.wiglecsv` is uploaded** (`UPLOAD_EXTENSIONS`). Until 2026-10-10 the `.kismet` databases were uploaded too, tar.gz'd, and WiGLE recorded zero networks from every one (57 in a row, some over 100 MB); the same session's `.wiglecsv` already carries every network. The `.kismet` files (with any `-journal`) are archived on the Pi as a local record and counted as `files_archived_kept`.
 - **Empty sessions**: header-only `.wiglecsv` and 0-byte files are archived without uploading.
-- **Surveillance and tracking devices** (`detect.py`, #35): before upload, each `.wiglecsv` is checked for Flock ALPR cameras (SSID `Flock-` + serial, medium), Axon devices (Axon's IEEE OUI in a globally administered address, high), Flipper Zeros (Bluetooth name, high) and Bluetooth serial modules as used in card skimmers (low: logged, never alerted). Only counts per kind leave it: a "Surveillance devices on this drive" log line, `wigle_sync_last_sync_detections{kind,confidence}` on the Pushgateway, and wigle-console's `/api/status` `detections`. Trackers (AirTags, SmartTags, Tile) need the advert data only the `.kismet` has, which isn't downloaded; that's a later step.
+- **Surveillance and tracking devices** (`detect.py`, #35): before upload, each `.wiglecsv` is checked for Flock ALPR cameras (SSID `Flock-` + serial, medium), Axon devices (Axon's IEEE OUI in a globally administered address, high), Flipper Zeros (Bluetooth name, high) and Bluetooth serial modules as used in card skimmers (low: logged, never alerted). Only counts per kind leave it: a "Surveillance devices on this drive" log line, `wigle_sync_last_sync_detections{kind,confidence}` on the Pushgateway, and wigle-console's `/api/status` `detections`. The console's after-action report (below) lists each one in full, by choice. Trackers (AirTags, SmartTags, Tile) need the advert data only the `.kismet` has, which isn't downloaded; that's a later step.
 - **Compression**: files are tar.gz'd before upload (WiGLE's limit is 180 MiB).
 
 ## Architecture
@@ -213,6 +213,18 @@ all-time total (files and MB). Below them, a 96h strip of hourly runs on the lef
 plus the latest uploads' processing state on the right (one column on a
 phone). Faults from the sync job appear only when there are any, each distinct
 one once with a count. `/api/status` serves the same data as JSON.
+
+**After action** (collapsed until opened; it remembers): a report on each
+recent drive file, newest first, one file at a time (`report.py`). The sync
+builds it while it has the `.wiglecsv` and logs it as one "After-action report"
+line, so it lasts as long as Loki's 4 days. It shows the drive's length and
+distance, devices by type, LED2's on-time rebuilt from the Flock and Axon rows
+(the LED's own 60 s rule), sightings and new devices per minute, stretches
+with no rows (no GPS fix?), Wi-Fi signal, channels per band, how often devices
+were seen again, the most-seen networks, and each detection with its name,
+address, time and where it was loudest. Names, places and times are in it by
+choice; it goes to Loki, never to git. Kismet's CSV has no Bluetooth RSSI, no
+GPS accuracy and no Wi-Fi security beyond WPS, so none of those are shown.
 
 The all-time totals (`wigle_sync_files_uploaded_since_launch`,
 `wigle_sync_bytes_uploaded_since_launch`) live in the Pushgateway: each run that

@@ -103,3 +103,21 @@ def test_last_run_leaves_the_labelled_detections_out():
     with mock.patch.object(stats, "_prom_values", return_value={"wigle_sync_pi_online": 1.0}) as values:
         assert stats.last_run() == {"pi_online": 1.0}
     assert '__name__!="wigle_sync_last_sync_detections"' in values.call_args.args[0]
+
+
+def test_after_action_keeps_each_files_newest_report_newest_drive_first():
+    def line(ts, name, start, rows):
+        return {"_ts": ts, "event": stats.REPORT_EVENT, "report": {"file": name, "start": start, "rows": rows}}
+
+    lines = [  # as Loki returns them: newest line first
+        line(300, "Kismet-a.wiglecsv", 10, rows=2),  # re-uploaded: this one wins
+        line(200, "Kismet-b.wiglecsv", 20, rows=5),
+        line(100, "Kismet-a.wiglecsv", 10, rows=1),
+        {"_ts": 50, "event": "Sync complete"},
+    ]
+    with mock.patch.object(stats, "_loki_lines", return_value=lines):
+        reports = stats.after_action()["reports"]
+    assert [(r["file"], r["rows"], r["logged_at"]) for r in reports] == [
+        ("Kismet-b.wiglecsv", 5, 200),
+        ("Kismet-a.wiglecsv", 2, 300),
+    ]

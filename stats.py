@@ -17,6 +17,7 @@ import console_metrics
 import detect
 from observability import DETECTIONS
 from sync import pi_is_online
+from sync import REPORT_EVENT
 from wigle_client import WIGLE_API_URL
 
 log = structlog.get_logger()
@@ -32,6 +33,8 @@ CRONJOB = os.environ.get("SYNC_CRONJOB", "wigle-sync")
 SYNC_CONTAINER = os.environ.get("SYNC_CONTAINER", "wigle-sync")
 # Loki (and so run history / errors) keeps 4 days.
 HISTORY_WINDOW_SECONDS = 4 * 24 * 3600
+# After-action reports the console can switch between (one per drive file).
+AFTER_ACTION_REPORTS = 6
 
 # WiGLE's API is rate limited per day; the numbers only move when an upload
 # finishes processing, so there's no point asking more often than this.
@@ -217,6 +220,19 @@ def errors() -> dict[str, Any]:
     return {"items": out}
 
 
+def after_action() -> dict[str, Any]:
+    """The newest drives' after-action reports (report.py), newest drive first.
+    One per file; Loki keeps 4 days, so a Pi left home longer has none."""
+    lines = _loki_lines(f'{{namespace="{NAMESPACE}",container="{SYNC_CONTAINER}"}} |= "{REPORT_EVENT}"', limit=20)
+    by_file: dict[str, dict[str, Any]] = {}
+    for e in lines:  # newest line first: a re-upload's report replaces the old one
+        r = e.get("report")
+        if e.get("event") == REPORT_EVENT and isinstance(r, dict) and r.get("file") not in by_file:
+            by_file[r["file"]] = {**r, "logged_at": e["_ts"]}
+    reports = sorted(by_file.values(), key=lambda r: r.get("start") or 0, reverse=True)
+    return {"reports": reports[:AFTER_ACTION_REPORTS]}
+
+
 _UPLOAD_NAME = re.compile(r"^\d+_(.+?\.(?:kismet|wiglecsv))")
 # Kismet names each session for its start time, in UTC.
 _KISMET_START = re.compile(r"^Kismet-(\d{8}-\d{2}-\d{2}-\d{2})")
@@ -305,6 +321,7 @@ def collect() -> dict[str, Any]:
             "history": _section("history", history),
             "errors": _section("errors", errors),
             "detections": _section("detections", detections),
+            "after_action": _section("after_action", after_action),
             "wigle": _section("wigle", wigle),
         }
 
