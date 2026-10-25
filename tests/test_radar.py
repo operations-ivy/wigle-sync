@@ -24,7 +24,8 @@ def kml(*nets):
     marks = "".join(
         f"<Placemark><name>n</name><description>Network ID: {n}&lt;br/&gt;Time: 2026-10-09T21:15:02.000-04:00"
         f"&lt;br/&gt;Type: WIFI</description><Point><coordinates>{lon},{lat}</coordinates></Point></Placemark>"
-        for n, lat, lon in nets)
+        for n, lat, lon in nets
+    )
     return f"<kml><Document>{marks}</Document></kml>"
 
 
@@ -93,6 +94,7 @@ def fake_wigle(uploads, kmls, calls):
         # WiGLE answers 406 to a KML request that only accepts JSON.
         assert kwargs["headers"]["Accept"] != "application/json"
         return FakeResponse(kmls[name])
+
     return get
 
 
@@ -101,13 +103,21 @@ def done(transid):
 
 
 def test_recent_drives_in_full_older_ones_as_ghosts_a_few_at_a_time():
-    uploads = [done("20261010-3"), {"transid": "20261009-x", "status": "W", "totalGps": 5},
-               done("20261008-2"), done("20261007-1"), done("20261006-0")]
+    uploads = [
+        done("20261010-3"),
+        {"transid": "20261009-x", "status": "W", "totalGps": 5},
+        done("20261008-2"),
+        done("20261007-1"),
+        done("20261006-0"),
+    ]
     kmls = {t: kml((t, 40.0, -75.0)) for t in ("20261010-3", "20261008-2", "20261007-1", "20261006-0")}
     calls = []
     r = radar.Radar(("name", "token"))
-    with (mock.patch.object(radar.requests, "get", side_effect=fake_wigle(uploads, kmls, calls)),
-          mock.patch.object(radar, "RADAR_UPLOADS", 2), mock.patch.object(radar, "FETCHES_PER_REFRESH", 1)):
+    with (
+        mock.patch.object(radar.requests, "get", side_effect=fake_wigle(uploads, kmls, calls)),
+        mock.patch.object(radar, "RADAR_UPLOADS", 2),
+        mock.patch.object(radar, "FETCHES_PER_REFRESH", 1),
+    ):
         r.refresh()
         # Both recent drives, but only one older one this time round.
         assert calls == ["transactions", "20261010-3", "20261008-2", "20261007-1"]
@@ -126,17 +136,21 @@ def test_recent_drives_in_full_older_ones_as_ghosts_a_few_at_a_time():
 def test_a_network_is_new_only_on_the_first_drive_that_saw_it():
     uploads = [done("20261010-2"), done("20261009-1"), done("20261008-0")]
     kmls = {
-        "20261008-0": kml(("old", 40.0, -75.0)),                                     # ghost layer
+        "20261008-0": kml(("old", 40.0, -75.0)),  # ghost layer
         "20261009-1": kml(("old", 40.0, -75.0), ("mid", 40.001, -75.0)),
         "20261010-2": kml(("mid", 40.001, -75.0), ("fresh", 40.002, -75.0)),
     }
     r = radar.Radar(("name", "token"))
-    with (mock.patch.object(radar.requests, "get", side_effect=fake_wigle(uploads, kmls, [])),
-          mock.patch.object(radar, "RADAR_UPLOADS", 2)):
+    with (
+        mock.patch.object(radar.requests, "get", side_effect=fake_wigle(uploads, kmls, [])),
+        mock.patch.object(radar, "RADAR_UPLOADS", 2),
+    ):
         r.refresh()
     snap = r.snapshot(now=1791595202.0)
-    assert snap["drives"] == [{"date": "2026-10-10", "contacts": 2, "new": 1},
-                              {"date": "2026-10-09", "contacts": 2, "new": 1}]
+    assert snap["drives"] == [
+        {"date": "2026-10-10", "contacts": 2, "new": 1},
+        {"date": "2026-10-09", "contacts": 2, "new": 1},
+    ]
     assert sum(c[5] for c in snap["contacts"]) == 2
     assert snap["ghost_drives"] == 1 and snap["ghost"]
     out = json.dumps(snap)

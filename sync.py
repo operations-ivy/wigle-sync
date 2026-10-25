@@ -5,9 +5,9 @@ import csv
 import io
 import math
 import os
-import statistics
 import socket
 import sqlite3
+import statistics
 import sys
 import tarfile
 import tempfile

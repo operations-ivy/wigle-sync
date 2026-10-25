@@ -8,7 +8,6 @@ from observability import push_totals
 from observability import RunStats
 from observability import UPLOADED_TOTAL
 
-
 GATEWAY_WITH_TOTAL = """# TYPE wigle_sync_files_uploaded_since_launch gauge
 wigle_sync_files_uploaded_since_launch{instance="",job="wigle-sync"} 40
 wigle_sync_files_uploaded_since_launch{instance="",job="other"} 999

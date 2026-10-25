@@ -115,8 +115,11 @@ def project(points, center, now: float) -> dict[str, Any]:
     dists = sorted(p[1] for p in polar)
     p90 = dists[int(0.9 * (len(dists) - 1))]
     radius = next((r for r in NICE_RADII_M if r >= p90), NICE_RADII_M[-1])
-    contacts = [[round(b, 1), round(d / radius, 3), max(0, round(now - s)) if s else None, k, drive, int(new)]
-                for b, d, s, k, drive, new in polar if d <= radius]
+    contacts = [
+        [round(b, 1), round(d / radius, 3), max(0, round(now - s)) if s else None, k, drive, int(new)]
+        for b, d, s, k, drive, new in polar
+        if d <= radius
+    ]
     return {"radius_m": radius, "contacts": contacts}
 
 
@@ -141,10 +144,10 @@ class Radar:
         self.auth = auth
         self.center = center
         self._lock = threading.Lock()
-        self._recent: dict[str, list] = {}   # transid -> parse_kml points, newest drives
-        self._ghost: dict[str, set] = {}     # transid -> {(lat, lon) at ~11 m}, older drives
-        self._keys: dict[str, set] = {}      # transid -> network keys, for first sightings
-        self._order: list[str] = []          # every kept transid, newest first
+        self._recent: dict[str, list] = {}  # transid -> parse_kml points, newest drives
+        self._ghost: dict[str, set] = {}  # transid -> {(lat, lon) at ~11 m}, older drives
+        self._keys: dict[str, set] = {}  # transid -> network keys, for first sightings
+        self._order: list[str] = []  # every kept transid, newest first
         # snapshot() is the costly part (every ghost cell projected), and the
         # data only changes on refresh: recompute when the order changes.
         self._snap: tuple[tuple, dict] | None = None
@@ -154,15 +157,16 @@ class Radar:
 
     def _get(self, path: str, accept: str = "application/json", **params) -> requests.Response:
         # The KML endpoint answers 406 to "Accept: application/json".
-        r = requests.get(f"{WIGLE_API_URL}{path}", params=params, auth=self.auth,
-                         headers={"Accept": accept}, timeout=60)
+        r = requests.get(
+            f"{WIGLE_API_URL}{path}", params=params, auth=self.auth, headers={"Accept": accept}, timeout=60
+        )
         r.raise_for_status()
         return r
 
     def refresh(self) -> None:
         uploads = self._get("/file/transactions", pagestart=0, pageend=100).json().get("results", [])
         done = [u["transid"] for u in uploads if u.get("status") == "D" and (u.get("totalGps") or 0) > 0]
-        recent, older = done[:RADAR_UPLOADS], done[RADAR_UPLOADS:RADAR_UPLOADS + GHOST_UPLOADS]
+        recent, older = done[:RADAR_UPLOADS], done[RADAR_UPLOADS : RADAR_UPLOADS + GHOST_UPLOADS]
         budget = FETCHES_PER_REFRESH
         try:
             for transid in recent + older:
@@ -180,8 +184,12 @@ class Radar:
                         self._recent[transid] = points
                     else:
                         self._ghost[transid] = {(round(p[0], 4), round(p[1], 4)) for p in points}
-                log.info("Radar loaded an upload", transid=transid, contacts=len(points),
-                         layer="recent" if transid in recent else "ghost")
+                log.info(
+                    "Radar loaded an upload",
+                    transid=transid,
+                    contacts=len(points),
+                    layer="recent" if transid in recent else "ghost",
+                )
         finally:
             # Even when a fetch fails partway, show what did load: otherwise a
             # pod holds every recent drive and shows none until the next refresh.
@@ -215,8 +223,11 @@ class Radar:
     def counts(self) -> dict[str, int]:
         """How many drives each layer holds, and the recent drives' contacts."""
         with self._lock:
-            return {"recent": len(self._recent), "ghost": len(self._ghost),
-                    "contacts": sum(len(p) for p in self._recent.values())}
+            return {
+                "recent": len(self._recent),
+                "ghost": len(self._ghost),
+                "contacts": sum(len(p) for p in self._recent.values()),
+            }
 
     def snapshot(self, now: float | None = None) -> dict[str, Any]:
         now = time.time() if now is None else now
@@ -237,18 +248,30 @@ class Radar:
                 keys = self._keys.get(t, set())
                 firsts[t] = keys - known
                 known |= keys
-        empty = {"radius_m": NICE_RADII_M[1], "contacts": [], "drives": [], "ghost": [], "total": 0,
-                 "ghost_drives": 0, "centered": "none"}
+        empty = {
+            "radius_m": NICE_RADII_M[1],
+            "contacts": [],
+            "drives": [],
+            "ghost": [],
+            "total": 0,
+            "ghost_drives": 0,
+            "centered": "none",
+        }
         if not recent:
             return empty
-        points = [(p[0], p[1], p[2], p[3], i, p[4] in firsts[t])
-                  for i, t in enumerate(order) for p in recent[t]]
+        points = [(p[0], p[1], p[2], p[3], i, p[4] in firsts[t]) for i, t in enumerate(order) for p in recent[t]]
         center = self.center or (statistics.median(p[0] for p in points), statistics.median(p[1] for p in points))
         projected = project(points, center, now)
         drives = [{"date": drive_date(t), "contacts": len(recent[t]), "new": len(firsts[t])} for t in order]
-        snap = {**projected, "drives": drives, "total": len(points),
-                "ghost": ghost(ghost_cells, center, projected["radius_m"]),
-                "ghost_drives": len(self._ghost), "centered": "home" if self.center else "median", "at": now}
+        snap = {
+            **projected,
+            "drives": drives,
+            "total": len(points),
+            "ghost": ghost(ghost_cells, center, projected["radius_m"]),
+            "ghost_drives": len(self._ghost),
+            "centered": "home" if self.center else "median",
+            "at": now,
+        }
         with self._lock:
             self._snap = (version, snap)
         return snap

@@ -7,7 +7,8 @@ import json
 import os
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer
 from unittest import mock
 from urllib.parse import urlsplit
 

@@ -12,8 +12,12 @@ SCRIPT = Path(__file__).resolve().parent.parent / "pi" / "rootfs" / "usr" / "loc
 def run(tmp_path, min_free_mb):
     # "Free space" in MiB: 1000 less one per file left, so it rises as files go.
     free = f"echo $((1000 - $(ls {tmp_path / 'uploaded'} | wc -l)))"
-    env = {"PATH": "/usr/bin:/bin", "DIR": str(tmp_path / "uploaded"), "MIN_FREE_MB": str(min_free_mb),
-           "FREE_MB_CMD": free}
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "DIR": str(tmp_path / "uploaded"),
+        "MIN_FREE_MB": str(min_free_mb),
+        "FREE_MB_CMD": free,
+    }
     result = subprocess.run(["sh", str(SCRIPT)], env=env, capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
     return sorted(p.name for p in (tmp_path / "uploaded").iterdir()), result.stdout

@@ -5,7 +5,9 @@ import socket
 import sqlite3
 from unittest import mock
 
+from config import Settings
 from observability import RunStats
+from pi_client import RemoteFile
 from sync import has_observations
 from sync import pi_is_online
 from sync import recover_kismet_db
@@ -13,8 +15,6 @@ from sync import run
 from sync import span_attributes
 from sync import stationary
 from sync import sync_file
-from config import Settings
-from pi_client import RemoteFile
 from wigle_client import WigleUnreachable
 
 

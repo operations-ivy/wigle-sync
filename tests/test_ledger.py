@@ -9,10 +9,10 @@ from unittest import mock
 import ledger as ledgers
 import sync
 from observability import RunStats
-from tests.test_functional_sync import HEADER
-from tests.test_functional_sync import ROW
 from tests.test_functional_sync import archived
+from tests.test_functional_sync import HEADER
 from tests.test_functional_sync import put
+from tests.test_functional_sync import ROW
 from tests.test_functional_sync import world  # noqa: F401 (fixture)
 
 

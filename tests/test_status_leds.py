@@ -38,11 +38,19 @@ def test_axon_oui_alerts_on_either_phy():
 
 
 def test_flipper_and_ordinary_devices_do_not():
-    assert leds.kinds_near([device("AA:BB:CC:00:00:01", "Flipper Bob", "Bluetooth"), device("AA:BB:CC:00:00:02", "HomeNet")]) == set()
+    assert (
+        leds.kinds_near(
+            [device("AA:BB:CC:00:00:01", "Flipper Bob", "Bluetooth"), device("AA:BB:CC:00:00:02", "HomeNet")]
+        )
+        == set()
+    )
 
 
 def test_both_kinds():
-    assert leds.kinds_near([device("00:25:DF:12:34:56", ""), device("B4:1E:52:00:00:01", "Flock-ABCD")]) == {"axon", "flock"}
+    assert leds.kinds_near([device("00:25:DF:12:34:56", ""), device("B4:1E:52:00:00:01", "Flock-ABCD")]) == {
+        "axon",
+        "flock",
+    }
 
 
 def test_credentials(tmp_path):

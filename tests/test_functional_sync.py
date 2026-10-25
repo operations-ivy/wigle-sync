@@ -12,7 +12,8 @@ import sqlite3
 import tarfile
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer
 from unittest import mock
 
 import paramiko
@@ -22,8 +23,9 @@ from prometheus_client.parser import text_string_to_metric_families
 import sync
 import wigle_client
 from config import Settings
-from tests.fake_pi import FakePi, FakeWigle
 from observability import RunStats
+from tests.fake_pi import FakePi
+from tests.fake_pi import FakeWigle
 
 HEADER = "WigleWifi-1.4,appRelease=Kismet\nMAC,SSID,AuthMode,FirstSeen,Channel,RSSI,CurrentLatitude,CurrentLongitude\n"
 # A drive: two sightings about 1 km apart (a session that never moves is never uploaded, #26).

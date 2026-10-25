@@ -6,7 +6,6 @@ import threading
 import time
 
 import structlog
-
 from flask import Flask
 from flask import g
 from flask import jsonify
