@@ -5,8 +5,8 @@ whether the USB Bluetooth dongle is Kismet's hci0, the Pi's power and
 throttling flags, and whether it's on the home Wi-Fi. Run every 30 s by pi-metrics.timer (as root, to read
 Kismet's open files); writes to tmpfs, so the SD card isn't worn by it.
 
-Away from home nothing can reach Prometheus: the Prometheus agent beside it
-keeps these and remote-writes them once the Pi is home (README, "Metrics").
+Away from home nothing can reach Prometheus: vmagent beside it keeps these
+on disk and remote-writes them once the Pi is home (README, "Metrics").
 """
 from __future__ import annotations
 

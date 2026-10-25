@@ -1,9 +1,11 @@
-# The Prometheus agent on the wardriving Pi (setup-metrics.sh). It scrapes the
-# local node-exporter (with pi-metrics.py's readings) and remote-writes to the
-# cluster's Prometheus. Away from home the writes fail and wait in the agent's
-# WAL; back home it sends the backlog, which Prometheus accepts up to 24h old
-# (brick-k8s-config: outOfOrderTimeWindow). The Pi's clock comes from GPS
-# away from home (chrony), so those samples carry the right time.
+# vmagent's scrape config on the wardriving Pi (setup-metrics.sh; the
+# remote write is in vmagent.service). It scrapes the local node-exporter
+# (with pi-metrics.py's readings) and vmagent itself, and remote-writes to the
+# cluster's Prometheus. Away from home the writes fail and wait in vmagent's
+# on-disk queue, across reboots; back home it sends the backlog, which
+# Prometheus accepts up to 24h old (brick-k8s-config: outOfOrderTimeWindow).
+# The Pi's clock comes from GPS away from home (chrony), so those samples
+# carry the right time.
 global:
   scrape_interval: 30s
 scrape_configs:
@@ -18,7 +20,9 @@ scrape_configs:
       - source_labels: [__name__, device]
         regex: "node_wifi_station_.+;wlan_mon.*"
         action: drop
-remote_write:
-  - url: https://prometheus.brick.nozdormu.cloud/api/v1/write
-    queue_config:
-      max_backoff: 5m
+  # The queue itself: vmagent_remotewrite_pending_data_bytes is the backlog.
+  - job_name: brick69-vmagent
+    static_configs:
+      - targets: ["127.0.0.1:8429"]
+        labels:
+          instance: brick69

@@ -1,0 +1,31 @@
+# vmagent (VictoriaMetrics' agent, from Debian's victoria-metrics package):
+# scrapes agent.yml's targets and remote-writes to the cluster's Prometheus.
+# Away from home the writes fail and wait in its on-disk queue, which, unlike
+# the Prometheus agent's WAL, survives the reboot between a drive and home
+# (#47). The Pi is switched off by pulling the plug, and only the disk queue
+# survives that: one sending queue and a small memory budget keep at most a
+# few blocks (about a minute) in memory. After wait-for-clock, so samples
+# aren't stamped with the time the Pi last saved (no RTC).
+[Unit]
+Description=vmagent: brick69's metrics to the cluster's Prometheus, queued on disk while away
+After=network.target wait-for-clock.service
+Wants=wait-for-clock.service
+
+[Service]
+DynamicUser=yes
+StateDirectory=vmagent
+ExecStart=/usr/bin/vmagent \
+    -promscrape.config=/etc/vmagent/agent.yml \
+    -remoteWrite.url=https://prometheus.brick.nozdormu.cloud/api/v1/write \
+    -remoteWrite.forcePromProto=true \
+    -remoteWrite.tmpDataPath=/var/lib/vmagent \
+    -remoteWrite.maxDiskUsagePerURL=512MB \
+    -remoteWrite.queues=1 \
+    -memory.allowedBytes=4MB \
+    -httpListenAddr=127.0.0.1:8429 \
+    -loggerFormat=json
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

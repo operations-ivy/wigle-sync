@@ -295,10 +295,14 @@ down. Liveness stays on `/health`.
   localhost, plus `pi-metrics.py` every 30 s: Kismet's open log size and
   the logs waiting, the GPS fix and satellites, whether the Bluetooth dongle is `hci0`, power and
   throttling flags, home or away. Prometheus can't reach the Pi while it's
-  out, so a **Prometheus agent** on it scrapes those and remote-writes to
-  `prometheus.brick.nozdormu.cloud`; away, the samples wait in its WAL (up
-  to 24 hours) and arrive once it's home (the cluster's Prometheus accepts
-  them up to 24 hours late). The Pi has no RTC, so **chrony** takes GPS
+  out, so **vmagent** on it (Debian's `victoria-metrics` package,
+  `pi/metrics/vmagent.service`) scrapes those and remote-writes to
+  `prometheus.brick.nozdormu.cloud`; away, the samples wait in its on-disk
+  queue and arrive once it's home (the cluster's Prometheus accepts them up
+  to 24 hours late). The queue survives the reboot in between and a pulled
+  plug, losing at most the last minute or so it held in memory; the
+  Prometheus agent it replaced resent nothing from before a restart (#47).
+  `vmagent_remotewrite_pending_data_bytes` is the backlog. The Pi has no RTC, so **chrony** takes GPS
   time from gpsd (run with `-n`) when there's no internet, and those
   samples carry the right time. **fake-hwclock** saves the time at shutdown
   and hourly, so a boot starts near it, and **`wait-for-clock.service`**
