@@ -7,12 +7,17 @@ from __future__ import annotations
 
 import io
 import os
+import shutil
+import sqlite3
 import tarfile
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
 import paramiko
 import pytest
+from prometheus_client.parser import text_string_to_metric_families
 
 import sync
 import wigle_client
@@ -35,10 +40,22 @@ def world(tmp_path):
     known = tmp_path / "known_hosts"
     known.write_text(pi.known_hosts_line())
     settings = Settings(
-        wigle_api_name="n", wigle_api_token="t", wigle_donate=False, pi_host="127.0.0.1", pi_port=pi.port,
-        pi_user="wigle-sync", pi_ssh_key_path=str(key_path), pi_known_hosts_path=str(known),
-        pi_remote_dir="/kismet", pi_archive_dir="/kismet/uploaded", pi_connect_timeout=5.0, pi_probe_timeout=2.0,
-        min_file_age_seconds=300, file_extensions=(".kismet", ".wiglecsv"), compress=True)
+        wigle_api_name="n",
+        wigle_api_token="t",
+        wigle_donate=False,
+        pi_host="127.0.0.1",
+        pi_port=pi.port,
+        pi_user="wigle-sync",
+        pi_ssh_key_path=str(key_path),
+        pi_known_hosts_path=str(known),
+        pi_remote_dir="/kismet",
+        pi_archive_dir="/kismet/uploaded",
+        pi_connect_timeout=5.0,
+        pi_probe_timeout=2.0,
+        min_file_age_seconds=300,
+        file_extensions=(".kismet", ".wiglecsv"),
+        compress=True,
+    )
     with mock.patch.object(wigle_client, "WIGLE_API_URL", wigle.url):
         yield root / "kismet", settings, wigle
     pi.close()
@@ -71,7 +88,7 @@ def test_a_drive_is_uploaded_as_wiglecsv_and_everything_else_archived(world):
     # Only the .wiglecsv went to WiGLE, tar.gz'd, with the observation inside.
     [(name, body)] = wigle.uploads
     assert name == "Kismet-A.wiglecsv.tar.gz"
-    gz = body[body.index(b"\x1f\x8b"):]
+    gz = body[body.index(b"\x1f\x8b") :]
     with tarfile.open(fileobj=io.BytesIO(gz), mode="r:gz") as tar:
         assert ROW.encode() in tar.extractfile("Kismet-A.wiglecsv").read()
     assert archived(kismet) == ["Kismet-A.kismet", "Kismet-A.wiglecsv", "Kismet-B.wiglecsv"]
@@ -86,7 +103,7 @@ def test_surveillance_devices_on_a_drive_are_counted(world):
     sync.run(settings, stats)
     assert stats.uploaded == 1 and stats.detections == {"flock": 1}
     [(name, body)] = wigle.uploads
-    gz = body[body.index(b"\x1f\x8b"):]
+    gz = body[body.index(b"\x1f\x8b") :]
     with tarfile.open(fileobj=io.BytesIO(gz), mode="r:gz") as tar:
         assert flock.encode() in tar.extractfile("Kismet-A.wiglecsv").read()  # still uploaded as it was
 
@@ -130,3 +147,89 @@ def test_pi_away_is_a_quiet_success(world):
     stats = RunStats()
     sync.run(away, stats)
     assert not stats.pi_online and stats.succeeded and wigle.uploads == []
+
+
+def _crashed_kismet_db(tmp_path):
+    """A .kismet and its hot -journal as Kismet leaves them when the power is
+    pulled mid-write: one committed row, a transaction in flight."""
+    db = tmp_path / "live.kismet"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE devices (mac TEXT)")
+    conn.execute("INSERT INTO devices VALUES ('committed')")
+    conn.commit()
+    conn.execute("PRAGMA cache_size=1")
+    conn.execute("BEGIN")
+    conn.executemany("INSERT INTO devices VALUES (?)", [("uncommitted" * 50,)] * 500)
+    crashed = tmp_path / "crashed"
+    crashed.mkdir()
+    shutil.copy(db, crashed / "Kismet-J.kismet")
+    shutil.copy(f"{db}-journal", crashed / "Kismet-J.kismet-journal")
+    conn.rollback()
+    conn.close()
+    return crashed / "Kismet-J.kismet", crashed / "Kismet-J.kismet-journal"
+
+
+def test_a_kismet_db_cut_off_mid_write_is_uploaded_rolled_back(world, tmp_path):
+    kismet, settings, wigle = world
+    db, journal = _crashed_kismet_db(tmp_path)
+    put(kismet, db.name, db.read_bytes())
+    put(kismet, journal.name, journal.read_bytes())
+    with_db = Settings(**{**settings.__dict__, "upload_extensions": (".kismet", ".wiglecsv")})
+
+    stats = RunStats()
+    sync.run(with_db, stats)
+
+    assert stats.uploaded == 1 and stats.failed == 0
+    [(_, body)] = wigle.uploads
+    tar_bytes = body[body.index(b"\x1f\x8b") :]  # the gzip inside the multipart body
+    with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:gz") as tar:
+        uploaded = tmp_path / "uploaded.kismet"
+        uploaded.write_bytes(tar.extractfile("Kismet-J.kismet").read())
+    assert sqlite3.connect(uploaded).execute("SELECT mac FROM devices").fetchall() == [("committed",)]
+    # The db and its journal go to uploaded/ together.
+    assert archived(kismet) == ["Kismet-J.kismet", "Kismet-J.kismet-journal"]
+
+
+def test_pushed_metrics_read_as_prometheus_reads_them(world):
+    """The CronJob's push, as the Pushgateway stores it and Prometheus scrapes it."""
+    kismet, settings, _ = world
+    put(kismet, "Kismet-A.wiglecsv", HEADER + ROW)
+    pushes = []
+
+    class Gateway(BaseHTTPRequestHandler):
+        def do_GET(self):  # the totals, as the gateway would hold them
+            body = b'wigle_sync_files_uploaded_since_launch{job="wigle-sync"} 10\n'
+            body += b'wigle_sync_bytes_uploaded_since_launch{job="wigle-sync"} 1000\n'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            pushes.append((self.path, self.rfile.read(int(self.headers["Content-Length"]))))
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Gateway)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    stats = RunStats()
+    try:
+        with mock.patch.dict(os.environ, {"PUSHGATEWAY_URL": f"http://127.0.0.1:{server.server_address[1]}"}):
+            sync.run(settings, stats)
+            sync.push_metrics(stats, finished_at=1000.0)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    [(path, body)] = pushes
+    assert path == "/metrics/job/wigle-sync"
+    samples = {s.name: s.value for f in text_string_to_metric_families(body.decode()) for s in f.samples}
+    assert samples["wigle_sync_files_uploaded"] == 1
+    assert samples["wigle_sync_files_uploaded_since_launch"] == 11
+    assert samples["wigle_sync_bytes_uploaded_since_launch"] == 1000 + stats.bytes_uploaded
+    assert samples["wigle_sync_last_success_timestamp_seconds"] == 1000.0
+    assert samples["wigle_sync_pi_online"] == 1
