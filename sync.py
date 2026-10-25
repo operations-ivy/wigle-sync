@@ -186,18 +186,23 @@ def run(settings: Settings, stats: RunStats, dry_run: bool = False) -> None:
         pi.close()
 
 
-def seed_totals(settings: Settings, dry_run: bool = False) -> int:
-    """Set the lifetime totals from WiGLE's record of every upload on the account.
-
-    For when the Pushgateway lost them: a run never restarts a missing total.
-    This counts every upload on the account, including any made outside wigle-sync.
-    """
-    wigle = WigleClient(settings.wigle_api_name, settings.wigle_api_token)
-    uploads = wigle.transactions()
-    totals = {
+def wigle_totals(settings: Settings) -> dict[str, float]:
+    """The lifetime totals from WiGLE's record of every upload on the account,
+    including any made outside wigle-sync."""
+    uploads = WigleClient(settings.wigle_api_name, settings.wigle_api_token).transactions()
+    return {
         UPLOADED_TOTAL: float(len(uploads)),
         BYTES_TOTAL: float(sum(t.get("fileSize") or 0 for t in uploads)),
     }
+
+
+def seed_totals(settings: Settings, dry_run: bool = False) -> int:
+    """Set the lifetime totals from WiGLE's record of every upload on the account.
+
+    Each run already puts back a total the Pushgateway lost (push_metrics);
+    this forces a recount now, e.g. to check one.
+    """
+    totals = wigle_totals(settings)
     log.info("Counted WiGLE's upload history", **totals, dry_run=dry_run)
     if dry_run:
         return 0
@@ -260,7 +265,7 @@ def main() -> int:
         stats.duration_seconds = time.monotonic() - started
         log.info("Sync complete", **{**vars(stats), "detections": dict(stats.detections)})
         if not args.dry_run:
-            push_metrics(stats, finished_at=time.time())
+            push_metrics(stats, finished_at=time.time(), recount=lambda: wigle_totals(settings))
     finally:
         # The pod exits right after this; flush buffered spans or they're lost.
         if provider is not None:

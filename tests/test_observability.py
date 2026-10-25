@@ -17,15 +17,17 @@ wigle_sync_bytes_uploaded_since_launch{instance="",job="wigle-sync"} 5000
 """
 
 
-def _pushed(stats: RunStats, gateway_metrics: str = "", gateway_error: Exception | None = None) -> dict[str, float]:
+def _pushed(
+    stats: RunStats, gateway_metrics: str = "", gateway_error: Exception | None = None, recount=None
+) -> dict[str, float]:
     resp = mock.Mock(text=gateway_metrics)
     with mock.patch.dict("os.environ", {"PUSHGATEWAY_URL": "http://gw:9091"}):
         with (
             mock.patch("observability.pushadd_to_gateway") as push,
             mock.patch("observability.requests.get", return_value=resp, side_effect=gateway_error) as get,
         ):
-            push_metrics(stats, finished_at=1000.0)
-    if stats.uploaded:
+            push_metrics(stats, finished_at=1000.0, recount=recount)
+    if stats.uploaded or recount:
         assert get.call_args.args[0] == "http://gw:9091/metrics"
     else:
         get.assert_not_called()
@@ -131,3 +133,34 @@ def test_detections_pushed_for_every_kind_when_the_pi_was_home():
     home = _labelled(RunStats(pi_online=True, detections=Counter({"flock": 2, "skimmer": 1})))
     assert home == {("flock", "medium"): 2, ("axon", "high"): 0, ("flipper", "high"): 0, ("skimmer", "low"): 1}
     assert _labelled(RunStats(pi_online=False)) == {}  # away: the last drive's counts stay as they were
+
+
+WIGLE_COUNT = {UPLOADED_TOTAL: 150.0, BYTES_TOTAL: 9e6}
+
+
+def test_a_lost_total_is_recounted_from_wigle():
+    # WiGLE's history already holds this run's uploads: nothing is added on top.
+    recount = mock.Mock(return_value=WIGLE_COUNT)
+    pushed = _pushed(RunStats(pi_online=True, uploaded=2, bytes_uploaded=100), "", recount=recount)
+    assert (pushed[UPLOADED_TOTAL], pushed[BYTES_TOTAL]) == (150, 9e6)
+    recount.assert_called_once()
+
+
+def test_a_lost_total_heals_even_on_a_run_with_the_pi_away():
+    pushed = _pushed(RunStats(pi_online=False), "", recount=lambda: WIGLE_COUNT)
+    assert pushed[UPLOADED_TOTAL] == 150
+
+
+def test_wigle_is_not_asked_while_the_gateway_has_both_totals():
+    recount = mock.Mock()
+    pushed = _pushed(RunStats(pi_online=True, uploaded=1, bytes_uploaded=5), GATEWAY_WITH_TOTAL, recount=recount)
+    recount.assert_not_called()
+    assert pushed[UPLOADED_TOTAL] == 41
+    # Nothing uploaded and nothing missing: the totals aren't pushed at all.
+    assert UPLOADED_TOTAL not in _pushed(RunStats(pi_online=False), GATEWAY_WITH_TOTAL, recount=recount)
+
+
+def test_a_failed_recount_never_resets_a_total():
+    pushed = _pushed(RunStats(pi_online=True, uploaded=2), "", recount=mock.Mock(side_effect=OSError("wigle down")))
+    assert UPLOADED_TOTAL not in pushed
+    assert pushed["wigle_sync_files_uploaded"] == 2
