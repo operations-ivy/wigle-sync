@@ -125,6 +125,14 @@ minutes, a NetworkManager dispatcher script stops Kismet, and deletes the sessio
 if the Pi never left home (a boot in the driveway shouldn't upload the home
 network).
 
+The Pi is switched off by pulling its power, and once (2026-10-08) that left the
+home Wi-Fi profile empty, so it never rejoined home Wi-Fi (#25).
+`wifi-profile-guard.service` runs before NetworkManager on every boot: it puts
+back a profile that's missing or empty (or NUL-filled) from the last good copy
+in `/var/lib/wifi-profile-guard` (root only, never leaves the Pi), saves a good
+profile as the new copy atomically, moves empty netplan files aside, and
+reloads NetworkManager if it's somehow already running.
+
 `pi/bootstrap.sh` builds all of this on a fresh Raspberry Pi OS (or Kali) install
 and is safe to re-run. Kismet comes from Kismet's own apt repo on Raspberry Pi OS.
 The home SSID lives only on the Pi, in `/etc/default/kismet-pi`

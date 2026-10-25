@@ -1,0 +1,50 @@
+#!/bin/sh
+# Run at boot before NetworkManager (wifi-profile-guard.service, #25). A
+# power cut while a profile is written can leave it empty (2026-10-08: the
+# Pi never rejoined home Wi-Fi until its SD card was pulled). So:
+# - a profile that's missing or empty is put back from its last good copy;
+# - a good profile becomes the new copy (written atomically, root only:
+#   it holds the Wi-Fi password, and never leaves the Pi);
+# - empty netplan files from the same failure are moved aside (netplan
+#   refuses to generate with them);
+# - if NetworkManager is already up, it reloads, so even a start-order
+#   mistake heals.
+PROFILES=${PROFILES:-/etc/NetworkManager/system-connections}
+BACKUP=${BACKUP:-/var/lib/wifi-profile-guard}
+NETPLAN=${NETPLAN:-/etc/netplan}
+NMCLI=${NMCLI:-nmcli}
+
+valid() { [ -s "$1" ] && grep -q '^\[connection\]' "$1"; }
+
+# Write $1 to $2 so a power cut leaves either the old file or the new one.
+atomic_copy() {
+    tmp="$2.guard-tmp"
+    cp "$1" "$tmp" && chmod 600 "$tmp" && sync "$tmp" && mv -f "$tmp" "$2" && sync "$(dirname "$2")"
+}
+
+mkdir -p "$BACKUP" && chmod 700 "$BACKUP"
+restored=0
+for saved in "$BACKUP"/*.nmconnection; do
+    [ -e "$saved" ] || continue
+    live="$PROFILES/$(basename "$saved")"
+    if ! valid "$live" && valid "$saved"; then
+        atomic_copy "$saved" "$live" && restored=1
+        echo "restored $live from its last good copy"
+    fi
+done
+for live in "$PROFILES"/*.nmconnection; do
+    [ -e "$live" ] || continue
+    saved="$BACKUP/$(basename "$live")"
+    if valid "$live" && ! cmp -s "$live" "$saved"; then
+        atomic_copy "$live" "$saved" && echo "saved a copy of $live"
+    fi
+done
+for yaml in "$NETPLAN"/*.yaml; do
+    [ -e "$yaml" ] && [ ! -s "$yaml" ] || continue
+    mkdir -p "$BACKUP/netplan-empty"
+    mv -f "$yaml" "$BACKUP/netplan-empty/" && echo "moved aside empty $yaml"
+done
+if [ "$restored" = 1 ] && "$NMCLI" -t -f RUNNING general >/dev/null 2>&1; then
+    "$NMCLI" connection reload && echo "NetworkManager reloaded"
+fi
+exit 0
