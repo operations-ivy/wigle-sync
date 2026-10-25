@@ -1,0 +1,6 @@
+[Unit]
+Description=Free SD card space by removing the oldest uploaded Kismet sessions, only when it runs low (#24)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/kismet-prune-uploaded
