@@ -1,5 +1,5 @@
 # Grafana dashboard for the wardriving Pi (pi/metrics/): node-exporter and
-# pi-metrics.py's readings, sent by its Prometheus agent, late when it's been
+# pi-metrics.py's readings, sent by its vmagent, late when it's been
 # away.
 apiVersion: v1
 kind: ConfigMap
@@ -35,7 +35,7 @@ data:
       "panels": [
         {
           "type": "row",
-          "title": "Samples taken away from home arrive when it's back (the Prometheus agent's backlog)",
+          "title": "Samples taken away from home arrive when it's back (vmagent's backlog)",
           "collapsed": false,
           "panels": [],
           "gridPos": {

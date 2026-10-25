@@ -144,7 +144,7 @@ helper_privileged() { test -u "$1" || /usr/sbin/getcap "$1" | grep -q cap_net_ra
 check "kismet capture helper is privileged" helper_privileged /usr/bin/kismet_cap_linux_wifi
 check "kismet bluetooth helper is privileged" helper_privileged /usr/bin/kismet_cap_linux_bluetooth
 check "node-exporter answers on localhost" sh -c 'curl -fsS http://127.0.0.1:9100/metrics | grep -q "^pi_gps_fix_mode"'
-check "Prometheus agent running" systemctl is-active prometheus.service
+check "vmagent running" systemctl is-active vmagent.service
 check "chrony running" systemctl is-active chrony.service
 check "fake-hwclock has a saved time" test -s /etc/fake-hwclock.data
 check "Kismet waits for the clock" sh -c 'systemctl show -p Wants kismet.service | grep -q wait-for-clock.service'
