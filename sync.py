@@ -20,6 +20,7 @@ from opentelemetry.trace import Status
 from opentelemetry.trace import StatusCode
 
 import detect
+import ledger as ledgers
 import report
 from config import Settings
 from observability import BYTES_TOTAL
@@ -113,7 +114,15 @@ def pi_is_online(host: str, port: int, timeout: float) -> bool:
         return False
 
 
-def sync_file(pi: PiClient, wigle: WigleClient, remote_file: RemoteFile, settings: Settings, stats: RunStats) -> None:
+def sync_file(
+    pi: PiClient,
+    wigle: WigleClient,
+    remote_file: RemoteFile,
+    settings: Settings,
+    stats: RunStats,
+    ledger: ledgers.NullLedger | None = None,
+) -> None:
+    ledger = ledger or ledgers.NullLedger()
     with tracer.start_as_current_span("sync_file") as span, tempfile.TemporaryDirectory() as tmp:
         span.set_attribute("file.name", remote_file.name)
         span.set_attribute("file.size", remote_file.size)
@@ -150,6 +159,22 @@ def sync_file(pi: PiClient, wigle: WigleClient, remote_file: RemoteFile, setting
             stats.archived_stationary += 1
             return
 
+        # Already sent, by the ledger (#21): copied back onto the Pi, or uploaded/ was wiped.
+        key = ledgers.file_key(local_path)
+        prior = ledger.uploaded(key)
+        if prior:
+            span.set_attribute("sync.outcome", "already_uploaded")
+            log.info(
+                "Already uploaded, by the ledger; archiving without upload",
+                file=remote_file.name,
+                uploaded_as=prior.get("file"),
+                uploaded_at=prior.get("at"),
+            )
+            with tracer.start_as_current_span("pi.archive"):
+                pi.archive(remote_file)
+            stats.already_uploaded += 1
+            return
+
         with tracer.start_as_current_span("detect"):
             found = detect.scan(local_path)
         if found:
@@ -179,6 +204,8 @@ def sync_file(pi: PiClient, wigle: WigleClient, remote_file: RemoteFile, setting
 
         with tracer.start_as_current_span("wigle.upload"):
             result = wigle.upload(upload_path)
+        # Recorded before archiving: a crash between the two must not upload it twice.
+        ledger.record(key, "uploaded", file=remote_file.name, bytes=upload_size, wigle_results=result.get("results"))
         with tracer.start_as_current_span("pi.archive"):
             pi.archive(remote_file)
 
@@ -217,6 +244,8 @@ def run(settings: Settings, stats: RunStats, dry_run: bool = False) -> None:
         log.info("Pi went away while connecting, nothing to do", host=settings.pi_host, error=str(e))
         return
 
+    with tracer.start_as_current_span("ledger.load"):
+        ledger = ledgers.open_ledger(os.environ.get("KAFKA_BOOTSTRAP"), os.environ.get("LEDGER_TOPIC", ledgers.TOPIC))
     try:
         with tracer.start_as_current_span("pi.list"):
             ready = pi.list_ready_files()
@@ -228,7 +257,7 @@ def run(settings: Settings, stats: RunStats, dry_run: bool = False) -> None:
                 log.info("Dry run, would upload", file=remote_file.name, size=remote_file.size)
                 continue
             try:
-                sync_file(pi, wigle, remote_file, settings, stats)
+                sync_file(pi, wigle, remote_file, settings, stats, ledger)
             except WigleUnreachable as e:
                 # The home internet is down, not something wigle-sync got wrong. Every
                 # file is still on the Pi, so the next run picks them up; stop trying now.
@@ -241,6 +270,7 @@ def run(settings: Settings, stats: RunStats, dry_run: bool = False) -> None:
                 stats.failed += 1
                 log.exception("Failed to sync file, leaving it on the Pi for next run", file=remote_file.name)
     finally:
+        ledger.close()
         pi.close()
 
 

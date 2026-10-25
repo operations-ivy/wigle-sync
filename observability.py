@@ -112,6 +112,8 @@ class RunStats:
     archived_empty: int = 0
     # Sessions where the Pi never moved (home-only, #26): archived on the Pi, never uploaded.
     archived_stationary: int = 0
+    # Already uploaded by the ledger (#21): archived on the Pi, not sent again.
+    already_uploaded: int = 0
     # Not a format worth sending (see Settings.upload_extensions): archived, kept on the Pi.
     archived_kept: int = 0
     failed: int = 0
@@ -216,6 +218,11 @@ def push_metrics(stats: RunStats, finished_at: float, recount: Callable[[], dict
         "files_archived_stationary",
         "Sessions where the Pi never moved, archived without upload in the last run",
         stats.archived_stationary,
+    )
+    gauge(
+        "files_already_uploaded",
+        "Files the ledger says were already uploaded, archived in the last run",
+        stats.already_uploaded,
     )
     gauge(
         "files_archived_kept",
