@@ -61,6 +61,10 @@ spec:
                   value: "http://otel-collector-opentelemetry-collector.monitoring.svc.cluster.local:4317"
                 - name: PUSHGATEWAY_URL
                   value: "http://pushgateway-prometheus-pushgateway.monitoring.svc.cluster.local:9091"
+                # The ledger of uploads (ledger.py, brick-k8s-config's kafka/): the
+                # plain listener, inside the cluster. Unreachable is not a failure.
+                - name: KAFKA_BOOTSTRAP
+                  value: "kafka-kafka-bootstrap.brick-kafka.svc.cluster.local:9092"
                 # Downloads and tar.gz'ing happen here, not on the node's root disk
                 # (brick420's SD card is tight).
                 - name: TMPDIR

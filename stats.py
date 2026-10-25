@@ -194,6 +194,7 @@ def history() -> dict[str, Any]:
         "uploaded",
         "archived_empty",
         "archived_stationary",
+        "already_uploaded",
         "archived_kept",
         "failed",
         "deferred",
