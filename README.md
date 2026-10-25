@@ -133,6 +133,12 @@ in `/var/lib/wifi-profile-guard` (root only, never leaves the Pi), saves a good
 profile as the new copy atomically, moves empty netplan files aside, and
 reloads NetworkManager if it's somehow already running.
 
+Uploaded sessions stay in `/var/log/kismet/uploaded/`: the `.kismet` databases
+are never sent to WiGLE, so that's their only copy. They go only when the SD
+card needs the room (#24): `kismet-prune-uploaded.timer` checks hourly and,
+while under 4 GiB is free, removes the oldest session there (by name, which is
+its start time).
+
 `pi/bootstrap.sh` builds all of this on a fresh Raspberry Pi OS (or Kali) install
 and is safe to re-run. Kismet comes from Kismet's own apt repo on Raspberry Pi OS.
 The home SSID lives only on the Pi, in `/etc/default/kismet-pi`

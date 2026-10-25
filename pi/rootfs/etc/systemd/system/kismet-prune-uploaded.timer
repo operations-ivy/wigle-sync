@@ -1,0 +1,9 @@
+[Unit]
+Description=Check the SD card's free space hourly (kismet-prune-uploaded)
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=1h
+
+[Install]
+WantedBy=timers.target

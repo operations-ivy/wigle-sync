@@ -1,0 +1,28 @@
+#!/bin/sh
+# Run hourly by kismet-prune-uploaded.timer (#24). Keeps the SD card from
+# filling: while the log disk has under MIN_FREE_MB free, delete the oldest
+# session in uploaded/ (all its files). Only uploaded sessions, never one
+# waiting for wigle-sync. By space, not age: the .kismet databases there are
+# never sent to WiGLE (only the .wiglecsv is), so each is the only copy and
+# goes only when the card needs the room. Oldest by Kismet's file name, which
+# is its start time: with no RTC, mtimes can't be trusted.
+DIR=${DIR:-/var/log/kismet/uploaded}
+MIN_FREE_MB=${MIN_FREE_MB:-4096}
+# Free MiB on DIR's filesystem; tests stand in their own.
+FREE_MB_CMD=${FREE_MB_CMD:-"df -Pm \"\$DIR\" | awk 'NR==2 {print \$4}'"}
+
+free_mb() { eval "$FREE_MB_CMD"; }
+
+while [ "$(free_mb)" -lt "$MIN_FREE_MB" ]; do
+    oldest=$(ls "$DIR" 2>/dev/null | sed -n 's/^\(Kismet-[0-9]\{8\}-[0-9-]*\)\..*/\1/p' | sort -u | head -n 1)
+    if [ -z "$oldest" ]; then
+        echo "under ${MIN_FREE_MB} MiB free and nothing left in $DIR to remove"
+        exit 0
+    fi
+    for f in "$DIR/$oldest".*; do
+        [ -e "$f" ] || continue
+        echo "removing $f ($(free_mb) MiB free)"
+        rm -f -- "$f"
+    done
+done
+exit 0
