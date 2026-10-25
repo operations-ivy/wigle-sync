@@ -42,6 +42,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+import structlog
+
 from detect import kind_of
 
 KISMET = "http://127.0.0.1:2501"
@@ -210,7 +212,25 @@ def run_test() -> None:
             subprocess.run(["systemctl", "start", service], check=True)
 
 
+def init_logging() -> structlog.typing.FilteringBoundLogger:
+    """JSON lines when the unit sets LOG_FORMAT=json (status-leds.service), so the
+    journal's events are fields once host journals reach Loki (#45)."""
+    json_out = os.environ.get("LOG_FORMAT") == "json"
+    structlog.configure(
+        processors=[
+            structlog.processors.add_log_level,
+            structlog.processors.TimeStamper(fmt="iso", utc=True),
+            lambda _, __, event_dict: {**event_dict, "logger": "status-leds", "service": "status-leds"},
+            structlog.processors.JSONRenderer() if json_out else structlog.dev.ConsoleRenderer(colors=False),
+        ],
+        logger_factory=structlog.PrintLoggerFactory(),
+        cache_logger_on_first_use=False,
+    )
+    return structlog.get_logger()
+
+
 def main() -> None:
+    log = init_logging()
     leds = Leds()
     user, password = credentials(Path(os.environ["CREDENTIALS_DIRECTORY"]) / "kismet-httpd")
     near, kismet_up = set(), None
@@ -227,11 +247,11 @@ def main() -> None:
             except OSError:  # Kismet stopped (home) or not up yet
                 devices, up = [], False
             if up != kismet_up:
-                print("kismet answering" if up else "kismet not answering", flush=True)
+                log.info("kismet answering" if up else "kismet not answering")
                 kismet_up = up
             found = kinds_near(devices)
             if found != near:
-                print(f"near: {', '.join(sorted(found)) or 'nothing'}", flush=True)
+                log.info("near", kinds=sorted(found))
                 near = found
             temperature = read_temperature()
             if temperature is not None:
@@ -239,7 +259,7 @@ def main() -> None:
                 average = sum(readings) / len(readings)
                 new = heat_level(temperature, average, level)
                 if new != level:
-                    print(f"heat: {new} ({temperature:.1f} °C, average {average:.1f} °C)", flush=True)
+                    log.info("heat", level=new, celsius=round(temperature, 1), average_celsius=round(average, 1))
                     level = new
         leds.show(bool(near), level, now)
         time.sleep(STEP)

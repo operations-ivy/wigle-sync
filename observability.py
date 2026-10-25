@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -45,24 +46,50 @@ def _add_trace_context(_: object, __: str, event_dict: dict) -> dict:
     return event_dict
 
 
-def init_logging() -> None:
-    """JSON lines in k8s (promtail ships stdout to Loki); readable console output locally."""
-    renderer = (
-        structlog.processors.JSONRenderer()
-        if os.environ.get("LOG_FORMAT", "console") == "json"
-        else structlog.dev.ConsoleRenderer()
-    )
+def _add_logger_name(_, __, event_dict: dict) -> dict:
+    """`logger`: the stdlib logger's name, or the module a structlog call came from."""
+    record = event_dict.get("_record")
+    module = event_dict.pop("module", None)
+    event_dict.setdefault("logger", record.name if record is not None else module or "?")
+    return event_dict
+
+
+def init_logging(service: str = SERVICE_NAME) -> None:
+    """JSON lines in k8s (promtail ships stdout to Loki); readable console output locally.
+
+    Every line has timestamp, level, event, logger and service, whether it
+    came from structlog or a library's stdlib logger (werkzeug, urllib3...):
+    those go through the same processors, so a stream never mixes formats (#45).
+    """
+    json_out = os.environ.get("LOG_FORMAT", "console") == "json"
+    renderer = structlog.processors.JSONRenderer() if json_out else structlog.dev.ConsoleRenderer()
+    shared = [
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso", utc=True),
+        structlog.processors.CallsiteParameterAdder([structlog.processors.CallsiteParameter.MODULE]),
+        _add_logger_name,
+        lambda _, __, event_dict: {**event_dict, "service": service},
+        _add_trace_context,
+    ]
     structlog.configure(
-        processors=[
-            structlog.contextvars.merge_contextvars,
-            structlog.processors.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso", utc=True),
-            _add_trace_context,
-            structlog.processors.format_exc_info,
-            renderer,
-        ],
+        processors=[*shared, structlog.processors.format_exc_info, renderer],
         wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
     )
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(
+        structlog.stdlib.ProcessorFormatter(
+            foreign_pre_chain=[*shared, structlog.stdlib.ExtraAdder()],
+            processors=[
+                structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                structlog.processors.format_exc_info,
+                renderer,
+            ],
+        )
+    )
+    root = logging.getLogger()
+    root.handlers[:] = [handler]
+    root.setLevel(logging.INFO)
 
 
 def init_tracing(service_name: str = SERVICE_NAME) -> TracerProvider | None:

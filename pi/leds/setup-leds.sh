@@ -22,7 +22,7 @@ SRC="$(cd "$(dirname "$0")" && pwd)"
 [[ $EUID -eq 0 ]] || { echo "run as root" >&2; exit 1; }
 export DEBIAN_FRONTEND=noninteractive
 
-apt-get install -y -q --no-install-recommends python3 python3-libgpiod openssl
+apt-get install -y -q --no-install-recommends python3 python3-libgpiod python3-structlog openssl
 
 config=/boot/firmware/config.txt
 marker="# wigle-sync: RGB status LEDs (pi/leds/setup-leds.sh)"
