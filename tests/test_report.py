@@ -111,6 +111,10 @@ def test_nothing_to_report(tmp_path):
     assert report.build(db) is None
 
 
+# A drive: two sightings about 1 km apart (one that never moved is never uploaded, #26).
+DRIVE = HEADER + row("aa:00:00:00:00:01", "x", 0) + row("aa:00:00:00:00:02", "y", 60, lat=40.01)
+
+
 def _sync(tmp_path, text):
     csv = tmp_path / "Kismet-1.wiglecsv"
     csv.write_text(text)
@@ -124,15 +128,15 @@ def _sync(tmp_path, text):
 
 
 def test_sync_logs_one_report_per_file(tmp_path):
-    log, _, _ = _sync(tmp_path, HEADER + row("aa:00:00:00:00:01", "x", 0))
+    log, _, _ = _sync(tmp_path, DRIVE)
     [call] = [c for c in log.info.call_args_list if c.args == (REPORT_EVENT,)]
     assert call.kwargs["file"] == "Kismet-1.wiglecsv"
-    assert call.kwargs["report"]["rows"] == 1
+    assert call.kwargs["report"]["rows"] == 2
 
 
 def test_a_failed_report_never_holds_up_the_upload(tmp_path):
     with mock.patch("report.build", side_effect=ValueError("bad row")):
-        log, wigle, stats = _sync(tmp_path, HEADER + row("aa:00:00:00:00:01", "x", 0))
+        log, wigle, stats = _sync(tmp_path, DRIVE)
     wigle.upload.assert_called_once()
     assert stats.uploaded == 1
     log.warning.assert_called_once()
