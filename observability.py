@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import field
 
@@ -102,8 +103,8 @@ def pushed_totals(gateway: str) -> dict[str, float]:
 
     A total that's missing is left out rather than read as 0: the gateway
     losing its data looks the same as never having had it, and restarting a
-    total from this run's count would silently lose the history. Seed missing
-    totals with `sync.py --seed-totals` instead.
+    total from this run's count would silently lose the history. push_metrics
+    recounts a missing one from WiGLE instead (#20).
     """
     url = gateway if "://" in gateway else f"http://{gateway}"
     resp = requests.get(f"{url.rstrip('/')}/metrics", timeout=10)
@@ -116,6 +117,36 @@ def pushed_totals(gateway: str) -> dict[str, float]:
     return found
 
 
+def _totals(gateway: str, stats: RunStats, recount: Callable[[], dict[str, float]] | None) -> dict[str, float]:
+    """The lifetime totals to push: the gateway's plus this run's, or WiGLE's
+    recount for one the gateway lost. Never a total restarted from this run."""
+    try:
+        current = pushed_totals(gateway)
+    except Exception:
+        # Pushing a total without the old one would reset it; try again next run.
+        log.warning("Failed to read the upload totals, not updating them", uploaded=stats.uploaded, exc_info=True)
+        return {}
+    recounted: dict[str, float] = {}
+    if recount and any(name not in current for name in TOTALS):
+        try:
+            recounted = recount()
+        except Exception:
+            log.warning("Failed to recount the upload totals from WiGLE", exc_info=True)
+        else:
+            log.info("Recounted the upload totals missing from the Pushgateway from WiGLE", **recounted)
+    added = {UPLOADED_TOTAL: stats.uploaded, BYTES_TOTAL: stats.bytes_uploaded}
+    out = {}
+    for name in TOTALS:
+        if name in current:
+            if stats.uploaded:
+                out[name] = current[name] + added[name]
+        elif name in recounted:
+            out[name] = recounted[name]
+        elif stats.uploaded:
+            log.warning("Upload total missing from the Pushgateway, not resetting it", metric=name, added=added[name])
+    return out
+
+
 def push_totals(gateway: str, totals: dict[str, float]) -> None:
     """Push lifetime totals as given, e.g. to seed them; other metrics are untouched."""
     registry = CollectorRegistry()
@@ -124,13 +155,18 @@ def push_totals(gateway: str, totals: dict[str, float]) -> None:
     pushadd_to_gateway(gateway, job=SERVICE_NAME, registry=registry, timeout=10)
 
 
-def push_metrics(stats: RunStats, finished_at: float) -> None:
+def push_metrics(stats: RunStats, finished_at: float, recount: Callable[[], dict[str, float]] | None = None) -> None:
     """Push this run's results to the Pushgateway, which Prometheus scrapes.
 
     A CronJob pod is gone long before Prometheus would scrape it, hence push.
     pushadd only replaces the metrics sent, so `last_success` and `last_pi_online`
     keep their previous values on runs where they don't apply — which is what
     makes "hours since the Pi last synced" answerable from Prometheus.
+
+    recount gives the lifetime totals from WiGLE's upload history (which
+    already includes this run's uploads). With it, every run checks the
+    gateway's totals and puts back any that went missing, so a gateway that
+    lost its data heals itself on the next run (#20).
     """
     gateway = os.environ.get("PUSHGATEWAY_URL")
     if not gateway:
@@ -175,24 +211,9 @@ def push_metrics(stats: RunStats, finished_at: float) -> None:
             detections.labels(kind.key, kind.confidence).set(stats.detections.get(kind.key, 0))
     if stats.pi_online and stats.succeeded and not stats.deferred:
         gauge("last_success_timestamp_seconds", "When a sync with the Pi last completed cleanly", finished_at)
-    if stats.uploaded:
-        try:
-            current = pushed_totals(gateway)
-        except Exception:
-            # Pushing a total without the old one would reset it; leave it for a human instead.
-            log.warning("Failed to read the upload totals, not updating them", uploaded=stats.uploaded, exc_info=True)
-        else:
-            added = {UPLOADED_TOTAL: stats.uploaded, BYTES_TOTAL: stats.bytes_uploaded}
-            for name, value in added.items():
-                if name in current:
-                    gauge(name.removeprefix("wigle_sync_"), TOTALS[name], current[name] + value)
-                else:
-                    log.warning(
-                        "Upload total missing from the Pushgateway, not resetting it; "
-                        "seed it with sync.py --seed-totals",
-                        metric=name,
-                        added=value,
-                    )
+    if stats.uploaded or recount:
+        for name, value in _totals(gateway, stats, recount).items():
+            gauge(name.removeprefix("wigle_sync_"), TOTALS[name], value)
 
     try:
         pushadd_to_gateway(gateway, job=SERVICE_NAME, registry=registry, timeout=10)

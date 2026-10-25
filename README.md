@@ -229,9 +229,11 @@ GPS accuracy and no Wi-Fi security beyond WPS, so none of those are shown.
 The all-time totals (`wigle_sync_files_uploaded_since_launch`,
 `wigle_sync_bytes_uploaded_since_launch`) live in the Pushgateway: each run that
 uploads reads them back and pushes them increased. A run never restarts a total
-that's missing, since an empty gateway may just have lost its data; it logs a
-warning instead. To set them (first time, or after the gateway lost them), recount
-from WiGLE's upload history, which includes any uploads made outside wigle-sync:
+from its own count, since an empty gateway may just have lost its data. Instead,
+every run checks the gateway, and a total that's missing is recounted from
+WiGLE's upload history (which includes any uploads made outside wigle-sync) and
+put back, so a gateway that lost its volume heals on the next run (#20). To
+recount by hand:
 
 ```bash
 poetry run python sync.py --seed-totals --dry-run   # print the counts
