@@ -13,7 +13,8 @@ import json
 import os
 import socket
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import paramiko
@@ -158,8 +159,13 @@ class FakeWigle:
                 name = body.split(b'filename="', 1)[1].split(b'"', 1)[0].decode() if b'filename="' in body else "?"
                 fake.uploads.append((name, body))
                 ok = fake.status == 200
-                reply = json.dumps({"success": ok, "results": {"transid": "20261010-00001"} if ok else {},
-                                    "message": "" if ok else "rejected"}).encode()
+                reply = json.dumps(
+                    {
+                        "success": ok,
+                        "results": {"transid": "20261010-00001"} if ok else {},
+                        "message": "" if ok else "rejected",
+                    }
+                ).encode()
                 self.send_response(fake.status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(reply)))
@@ -176,5 +182,3 @@ class FakeWigle:
     def close(self) -> None:
         self.server.shutdown()
         self.server.server_close()
-
-

@@ -7,15 +7,14 @@ repos:
     -   id: end-of-file-fixer
     -   id: trailing-whitespace
         exclude: ^tests/fixtures/
--   repo: https://github.com/asottile/reorder-python-imports
-    rev: v3.14.0
+# Imports sorted by ruff's isort rules (pyproject.toml): one per line, as
+# reorder-python-imports did, but agreeing with black about the blank line
+# after a module docstring, which reorder-python-imports kept removing (#49).
+-   repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.0
     hooks:
-    -   id: reorder-python-imports
-        args: [
-            --application-directories, '.:src',
-            --py38-plus,
-            --add-import, 'from __future__ import annotations',
-        ]
+    -   id: ruff-check
+        args: [--fix]
 -   repo: https://github.com/asottile/pyupgrade
     rev: v3.19.1
     hooks:
@@ -30,5 +29,8 @@ repos:
     rev: 7.1.2
     hooks:
     -   id: flake8
+        # E203 and W503 are black's own style (slices, line breaks), not errors.
+        # tests/test_radar.py's KML fixture keeps WiGLE's own long lines.
         args: ["--max-line-length=120",
-              "--ignore=E042"]
+              "--ignore=E042,E203,W503",
+              "--per-file-ignores=tests/test_radar.py:E501"]

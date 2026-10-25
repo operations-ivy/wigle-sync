@@ -15,12 +15,16 @@ def tidy(tmp_path, text, old=OLD):
     config = tmp_path / "config.txt"
     config.write_text(text)
     env = {**os.environ, "OLD": "\n".join(old) + "\n"}
-    result = subprocess.run(["awk", "-v", f"MARK={MARK}", "-f", str(AWK), str(config)], env=env, capture_output=True, text=True, check=True)
+    result = subprocess.run(
+        ["awk", "-v", f"MARK={MARK}", "-f", str(AWK), str(config)], env=env, capture_output=True, text=True, check=True
+    )
     return result.stdout
 
 
 def test_old_lines_go_with_their_comments(tmp_path):
-    text = f"[all]\n{MARK}\ndtoverlay=pwm-gpio,gpio=6\n{MARK}\ndtoverlay=pwm-gpio,gpio=17\n{MARK}\ngpio=5,13,21,27=op,dl\n"
+    text = (
+        f"[all]\n{MARK}\ndtoverlay=pwm-gpio,gpio=6\n{MARK}\ndtoverlay=pwm-gpio,gpio=17\n{MARK}\ngpio=5,13,21,27=op,dl\n"
+    )
     assert tidy(tmp_path, text) == f"[all]\n{MARK}\ndtoverlay=pwm-gpio,gpio=17\n"
 
 

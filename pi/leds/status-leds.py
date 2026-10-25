@@ -161,7 +161,8 @@ class Leds:
 
     def __init__(self):
         import gpiod
-        from gpiod.line import Direction, Value
+        from gpiod.line import Direction
+        from gpiod.line import Value
 
         self.on, self.off = Value.ACTIVE, Value.INACTIVE
         pins = (LED2_RED, LED2_GREEN, LED2_BLUE, LED3_BLUE)
