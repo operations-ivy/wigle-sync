@@ -119,7 +119,7 @@ done
 udevadm control --reload
 systemctl daemon-reload
 nmcli general reload conf 2>/dev/null || systemctl reload NetworkManager
-systemctl enable gpsd.socket wifi-regdomain.service kismet.service
+systemctl enable gpsd.socket wifi-regdomain.service wifi-profile-guard.service kismet.service
 systemctl start wifi-regdomain.service
 # Kismet itself is left alone: starting it at home would record a home session.
 
