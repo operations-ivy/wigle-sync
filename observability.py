@@ -110,6 +110,8 @@ class RunStats:
     files_found: int = 0
     uploaded: int = 0
     archived_empty: int = 0
+    # Sessions where the Pi never moved (home-only, #26): archived on the Pi, never uploaded.
+    archived_stationary: int = 0
     # Not a format worth sending (see Settings.upload_extensions): archived, kept on the Pi.
     archived_kept: int = 0
     failed: int = 0
@@ -210,6 +212,11 @@ def push_metrics(stats: RunStats, finished_at: float, recount: Callable[[], dict
     gauge("files_found", "Capture files ready on the Pi in the last run", stats.files_found)
     gauge("files_uploaded", "Files uploaded to WiGLE in the last run", stats.uploaded)
     gauge("files_archived_empty", "Empty files archived without upload in the last run", stats.archived_empty)
+    gauge(
+        "files_archived_stationary",
+        "Sessions where the Pi never moved, archived without upload in the last run",
+        stats.archived_stationary,
+    )
     gauge(
         "files_archived_kept",
         "Files archived on the Pi without upload (not an upload format) in the last run",

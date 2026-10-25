@@ -26,7 +26,11 @@ from tests.fake_pi import FakePi, FakeWigle
 from observability import RunStats
 
 HEADER = "WigleWifi-1.4,appRelease=Kismet\nMAC,SSID,AuthMode,FirstSeen,Channel,RSSI,CurrentLatitude,CurrentLongitude\n"
-ROW = "aa:bb:cc:dd:ee:ff,test-net,[WPA2],2026-10-09 21:15:02,6,-70,40.0,-75.0\n"
+# A drive: two sightings about 1 km apart (a session that never moves is never uploaded, #26).
+ROW = (
+    "aa:bb:cc:dd:ee:ff,test-net,[WPA2],2026-10-09 21:15:02,6,-70,40.0,-75.0\n"
+    "aa:bb:cc:dd:ee:fe,test-net-2,[WPA2],2026-10-09 21:16:02,6,-70,40.01,-75.0\n"
+)
 
 
 @pytest.fixture

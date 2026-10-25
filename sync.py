@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import io
+import math
 import os
+import statistics
 import socket
 import sqlite3
 import sys
@@ -69,6 +73,38 @@ def has_observations(path: Path) -> bool:
         return sum(1 for _ in zip(range(3), fh)) > 2
 
 
+# A session whose GPS fixes all lie within this of their median never went
+# anywhere: booted at home and switched off before kismet-home-stop could
+# remove it (#26), or parked. GPS indoors wanders tens of metres.
+STATIONARY_METRES = 150
+
+
+def stationary(path: Path) -> bool:
+    """True when every GPS fix in a .wiglecsv is within STATIONARY_METRES of
+    their median: the Pi never moved. False with no fixes to judge by."""
+    if path.suffix != ".wiglecsv":
+        return False
+    lines = path.read_text(errors="replace").replace("\0", "").splitlines()
+    fixes = []
+    for row in csv.DictReader(io.StringIO("\n".join(lines[1:]))):
+        try:
+            lat, lon = float(row.get("CurrentLatitude") or ""), float(row.get("CurrentLongitude") or "")
+        except ValueError:
+            continue
+        if lat or lon:
+            fixes.append((lat, lon))
+    if not fixes:
+        return False
+    mid_lat = statistics.median(f[0] for f in fixes)
+    mid_lon = statistics.median(f[1] for f in fixes)
+    # Equirectangular: exact enough over a few hundred metres.
+    scale = math.cos(math.radians(mid_lat))
+    return all(
+        6_371_000 * math.radians(math.hypot(lat - mid_lat, (lon - mid_lon) * scale)) <= STATIONARY_METRES
+        for lat, lon in fixes
+    )
+
+
 def pi_is_online(host: str, port: int, timeout: float) -> bool:
     try:
         with socket.create_connection((host, port), timeout=timeout):
@@ -104,6 +140,14 @@ def sync_file(pi: PiClient, wigle: WigleClient, remote_file: RemoteFile, setting
             with tracer.start_as_current_span("pi.archive"):
                 pi.archive(remote_file)
             stats.archived_empty += 1
+            return
+
+        if stationary(local_path):
+            span.set_attribute("sync.outcome", "archived_stationary")
+            log.info("The Pi never moved in this session, archiving without upload", file=remote_file.name)
+            with tracer.start_as_current_span("pi.archive"):
+                pi.archive(remote_file)
+            stats.archived_stationary += 1
             return
 
         with tracer.start_as_current_span("detect"):
