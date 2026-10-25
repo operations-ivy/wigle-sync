@@ -154,6 +154,32 @@ th.num, td.num{ text-align:right; }
 
 footer{ font-family:var(--font-mono); font-size:11px; color:var(--text-faint); text-align:center; }
 
+/* After-action report: one drive file at a time, collapsed until opened. */
+details.panel > summary{ list-style:none; cursor:pointer; margin-bottom:0; flex-wrap:wrap; }
+details.panel > summary::-webkit-details-marker{ display:none; }
+details.panel > summary h2::before{ content:"▸ "; color:var(--cyan); }
+details.panel[open] > summary h2::before{ content:"▾ "; }
+details.panel[open] > summary{ margin-bottom:10px; }
+details.panel > summary:focus-visible{ outline:2px solid var(--cyan); outline-offset:2px; }
+.aa-files{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+.aa-files .toggle{ margin-top:0; }
+.aa-files .toggle[aria-pressed="true"]{ border-color:var(--cyan); color:var(--cyan); }
+.aa-grid{ display:grid; grid-template-columns:minmax(0,1fr); gap:14px 22px; margin-top:12px; }
+@media (min-width:900px){ .aa-grid{ grid-template-columns:repeat(2, minmax(0,1fr)); } }
+.aa-chart h3{ font-family:var(--font-mono); font-size:11px; font-weight:400; letter-spacing:.12em; text-transform:uppercase; color:var(--text-faint); margin:0 0 6px; }
+.aa-chart h3 b{ color:var(--text-dim); font-weight:400; letter-spacing:0; text-transform:none; }
+.strip{ display:grid; grid-template-columns:44px minmax(0,1fr); align-items:end; gap:8px; margin-bottom:6px; }
+.strip > span{ font-family:var(--font-mono); font-size:11px; color:var(--text-dim); text-align:right; padding-bottom:2px; }
+.hist{ display:flex; align-items:flex-end; gap:1px; height:40px; border-bottom:1px solid var(--line); }
+.hist.tall{ height:90px; gap:2px; }
+.hist .b{ flex:1 1 0; min-width:1px; border-radius:2px 2px 0 0; background:var(--cyan); }
+.hist .b.zero{ background:none; }
+.hist.mag .b{ background:var(--magenta); }
+.hist.vio .b{ background:var(--violet); }
+.hist.amb .b{ background:var(--amber); }
+.hist .b:hover{ filter:brightness(1.4); }
+.note{ font-family:var(--font-mono); font-size:11px; color:var(--text-faint); margin-top:4px; }
+
 @media (prefers-reduced-motion: reduce){ .hud::before{ animation:none; } }
 </style>
 </head>
@@ -203,6 +229,11 @@ footer{ font-family:var(--font-mono); font-size:11px; color:var(--text-faint); t
     </div>
   </div>
 
+  <details class="panel" id="aa-panel">
+    <summary class="panel-head"><h2>AFTER ACTION</h2><span class="meta" id="aa-meta"></span></summary>
+    <div id="aa-body"></div>
+  </details>
+
   <footer>Refreshes every 30s · <a href="https://grafana.brick.nozdormu.cloud/d/wigle-sync">Grafana → WiGLE Sync</a></footer>
 </div>
 
@@ -213,7 +244,7 @@ footer{ font-family:var(--font-mono); font-size:11px; color:var(--text-faint); t
   var REFRESH_MS = 30000;
   var QUEUE_ROWS = 5;
   var FAULT_ROWS = 5;
-  var state = { data: null, showAllQueue: false };
+  var state = { data: null, showAllQueue: false, aaIndex: 0 };
 
   function esc(s){
     return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
@@ -417,10 +448,140 @@ footer{ font-family:var(--font-mono); font-size:11px; color:var(--text-faint); t
     }).join("");
   }
 
+  /* ---------------- after-action report ---------------- */
+  var AA_TYPES = [["wifi", "Wi-Fi", ""], ["ble", "BLE", "vio"], ["bt", "BT", "amb"]];
+
+  function minutes(s){
+    s = Math.round(s || 0);
+    return s < 3600 ? Math.round(s / 60) + "m" : Math.floor(s / 3600) + "h " + pad(Math.round(s % 3600 / 60)) + "m";
+  }
+
+  // One bar per value, scaled to the largest; every bar has its own tooltip.
+  function hist(values, tip, cls){
+    var peak = Math.max.apply(null, values.concat([1]));
+    return '<div class="hist ' + (cls || "") + '">' + values.map(function(v, i){
+      var h = v ? Math.max(4, Math.round(100 * v / peak)) : 0;
+      return '<div class="b' + (v ? "" : " zero") + '" style="height:' + h + '%" title="' + esc(tip(v, i)) + '"></div>';
+    }).join("") + '</div>';
+  }
+
+  function chart(title, sub, body){
+    return '<div class="aa-chart"><h3>' + title + (sub ? ' · <b>' + sub + '</b>' : "") + '</h3>' + body + '</div>';
+  }
+
+  function aaTable(head, rows){
+    return '<div class="table-wrap"><table><thead><tr>' + head.map(function(h){
+      return '<th' + (h.charAt(0) === "#" ? ' class="num">' + h.slice(1) : ">" + h) + '</th>';
+    }).join("") + '</tr></thead><tbody>' + rows.join("") + '</tbody></table></div>';
+  }
+
+  function renderReport(r){
+    var tl = r.timeline;
+    function at(i){ return stamp(tl.start + i * tl.step); }
+    var stats = '<div class="stat-row">' +
+      '<div class="stat cy"><div class="n">' + minutes(r.duration_seconds) + '</div><div class="l">Drive</div>' +
+        '<div class="sub">' + stamp(r.start) + " – " + stamp(r.end) + '</div></div>' +
+      '<div class="stat"><div class="n">' + num(r.distance_km) + ' km</div><div class="l">Distance</div>' +
+        '<div class="sub">from the GPS fixes</div></div>' +
+      '<div class="stat"><div class="n">' + num(r.devices.wifi + r.devices.ble + r.devices.bt) + '</div><div class="l">Devices</div>' +
+        '<div class="sub">' + num(r.devices.wifi) + " wi-fi · " + num(r.devices.ble) + " ble · " + num(r.devices.bt) + " bt</div></div>" +
+      '<div class="stat' + (r.led2.lit_seconds ? " mag" : " ok") + '"><div class="n">' + minutes(r.led2.lit_seconds) + '</div>' +
+        '<div class="l">LED2 lit</div><div class="sub">' + plural(r.detections.length, "detection") + '</div></div></div>';
+
+    var strips = AA_TYPES.map(function(t){
+      return '<div class="strip"><span>' + t[1] + '</span>' + hist(tl.rows[t[0]], function(v, i){
+        return at(i) + " — " + v + " " + t[1] + " sightings, " + tl["new"][t[0]][i] + " new";
+      }, t[2]) + '</div>';
+    }).join("") + '<div class="strip"><span>LED2</span>' + hist(r.led2.per_minute, function(v, i){
+      return at(i) + " — LED2 lit " + v + "s";
+    }, "mag") + '</div>' +
+      '<div class="strip"><span></span><div class="axis"><span>' + stamp(tl.start) + '</span><span>' + stamp(r.end) + '</span></div></div>';
+
+    var rssi = r.rssi;
+    var rssiBody = hist(rssi.rows.wifi, function(v, i){
+      return rssi.bins[i] + " to " + (rssi.bins[i] + 10) + " dBm — " + num(v) + " sightings";
+    }, "tall") + '<div class="axis"><span>' + rssi.bins[0] + ' dBm</span><span>' + (rssi.bins[rssi.bins.length - 1] + 10) + ' dBm</span></div>' +
+      (r.sightings.ble + r.sightings.bt ? '<div class="note">Bluetooth has no RSSI in Kismet\'s CSV.</div>' : "");
+
+    function channelChart(band){
+      var ch = r.channels[band], keys = Object.keys(ch);
+      if (!keys.length) return chart(band + " GHz channels", "", '<div class="empty">None.</div>');
+      var total = keys.reduce(function(s, k){ return s + ch[k]; }, 0);
+      return chart(band + " GHz channels", plural(total, "network"), hist(keys.map(function(k){ return ch[k]; }), function(v, i){
+        return "channel " + keys[i] + " — " + plural(v, "network");
+      }, "tall") + '<div class="axis"><span>ch ' + keys[0] + '</span><span>ch ' + keys[keys.length - 1] + '</span></div>');
+    }
+
+    var repeat = AA_TYPES.filter(function(t){ return r.devices[t[0]]; }).map(function(t){
+      var b = r.repeat_sightings[t[0]];
+      return '<div class="strip"><span>' + t[1] + '</span>' + hist(b.map(function(x){ return x.devices; }), function(v, i){
+        return b[i].label + " sightings — " + plural(v, "device");
+      }, t[2]) + '</div>';
+    }).join("") + '<div class="strip"><span></span><div class="axis"><span>seen once</span><span>51+ times</span></div></div>';
+
+    var dets = r.detections.length ? aaTable(["What", "Name", "Address", "First", "#Seen", "#Best dBm", "Where"],
+      r.detections.map(function(x){
+        var where = x.lat && x.lon ? '<a href="https://www.openstreetmap.org/?mlat=' + x.lat + "&mlon=" + x.lon + '#map=18/' + x.lat + "/" + x.lon + '">map</a>' : "—";
+        return '<tr><td><span class="verdict ' + (x.confidence === "low" ? "info" : "bad") + '">' + esc(x.label) + '</span></td>' +
+          '<td>' + esc(x.name || "—") + '</td><td>' + esc(x.mac) + '</td><td>' + stamp(x.first_seen) + '</td>' +
+          '<td class="num">' + num(x.sightings) + '</td><td class="num">' + (x.best_rssi == null ? "—" : x.best_rssi) + '</td><td>' + where + '</td></tr>';
+      })) : '<div class="empty">No Flock, Axon, Flipper or serial Bluetooth devices heard.</div>';
+
+    var top = r.top_networks.length ? aaTable(["Network", "#Sightings", "#Access points"], r.top_networks.map(function(n){
+      return '<tr><td class="name">' + esc(n.ssid) + '</td><td class="num">' + num(n.sightings) + '</td><td class="num">' + num(n.bssids) + '</td></tr>';
+    })) : '<div class="empty">No named networks.</div>';
+
+    var cut = r.partial_rows || r.nul_bytes
+      ? '<div class="note">File ended abruptly (power pulled?): ' + [
+          r.partial_rows ? plural(r.partial_rows, "partial row") + " dropped" : "",
+          r.nul_bytes ? bytes(r.nul_bytes) + " of padding" : ""
+        ].filter(Boolean).join(", ") + ".</div>"
+      : "";
+    var gaps = r.gaps.length
+      ? '<div class="note">No rows ' + r.gaps.map(function(g){
+          return stamp(g.start) + "–" + stamp(g.end) + " (" + minutes(g.end - g.start) + ")";
+        }).join(", ") + ": no GPS fix?</div>"
+      : "";
+
+    return stats + cut + gaps + '<div class="aa-grid">' +
+      chart("Per minute", "sightings by type, and LED2", strips) +
+      chart("Wi-Fi signal", plural(r.sightings.wifi, "sighting"), rssiBody) +
+      channelChart("2.4") + channelChart("5") +
+      chart("Repeat sightings", "devices by times seen", repeat) +
+      chart("Most-seen networks", plural(r.hidden_networks, "hidden network"), top) +
+      '</div>' + chart("Detections", "", dets);
+  }
+
+  function renderAfterAction(d){
+    var a = d.after_action;
+    if (a.error) { $("aa-body").innerHTML = srcErr(a); $("aa-meta").textContent = ""; return; }
+    if (!a.reports.length) {
+      $("aa-meta").textContent = "none in 96h";
+      $("aa-body").innerHTML = '<div class="empty">No drive reports in the last 96h.</div>';
+      return;
+    }
+    var i = Math.min(state.aaIndex, a.reports.length - 1), r = a.reports[i];
+    $("aa-meta").textContent = r.file + " · " + stamp(r.start);
+    var files = a.reports.length > 1 ? '<div class="aa-files">' + a.reports.map(function(x, j){
+      return '<button class="toggle" type="button" data-aa="' + j + '" aria-pressed="' + (j === i) + '">' +
+        esc(stamp(x.start) + " · " + minutes(x.duration_seconds)) + '</button>';
+    }).join("") + '</div>' : "";
+    $("aa-body").innerHTML = files + renderReport(r);
+    Array.prototype.forEach.call(document.querySelectorAll("[data-aa]"), function(b){
+      b.addEventListener("click", function(){ state.aaIndex = Number(b.getAttribute("data-aa")); renderAfterAction(state.data); });
+    });
+  }
+
+  // Open or shut, as the viewer left it last time.
+  try { $("aa-panel").open = localStorage.getItem("aa-open") === "1"; } catch (e) {}
+  $("aa-panel").addEventListener("toggle", function(){
+    try { localStorage.setItem("aa-open", $("aa-panel").open ? "1" : "0"); } catch (e) {}
+  });
+
   /* ---------------- loop ---------------- */
   function render(){
     var d = state.data;
-    renderHud(d); renderRunLog(d); renderWigle(d); renderFaults(d);
+    renderHud(d); renderRunLog(d); renderWigle(d); renderFaults(d); renderAfterAction(d);
     tickCountdown();
   }
 

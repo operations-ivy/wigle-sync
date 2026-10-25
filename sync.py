@@ -16,6 +16,7 @@ from opentelemetry.trace import Status
 from opentelemetry.trace import StatusCode
 
 import detect
+import report
 from config import Settings
 from observability import BYTES_TOTAL
 from observability import init_logging
@@ -31,6 +32,8 @@ from wigle_client import WigleUnreachable
 
 log = structlog.get_logger()
 tracer = trace.get_tracer(__name__)
+# The log line the console finds the newest report by (stats.after_action).
+REPORT_EVENT = "After-action report"
 
 
 def compress(path: Path) -> Path:
@@ -110,6 +113,17 @@ def sync_file(pi: PiClient, wigle: WigleClient, remote_file: RemoteFile, setting
             stats.detections.update(found)
             log.info("Surveillance devices on this drive", file=remote_file.name, **found)
         span.set_attribute("detect.alerting", sum(detect.alerting(found).values()))
+
+        # The console's after-action report: only the sync ever has the file.
+        # A report that fails to build never holds up the upload.
+        with tracer.start_as_current_span("report"):
+            try:
+                after_action = report.build(local_path)
+            except Exception:
+                log.warning("After-action report failed", file=remote_file.name, exc_info=True)
+            else:
+                if after_action:
+                    log.info(REPORT_EVENT, file=remote_file.name, report=after_action)
 
         if settings.compress:
             with tracer.start_as_current_span("compress"):
