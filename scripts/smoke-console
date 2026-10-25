@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""After a console deploy: does every wigle-console replica answer? (#28)
+
+    scripts/smoke-console          # exit 0 when every pod is ready and serves a status
+
+Each pod is asked from inside itself (kubectl exec), so one replica can't
+answer for another as it would through the Service. It checks /ready (the
+radar has loaded), /api/status (every section present; a dead upstream shows
+as that section's error, which is reported but isn't a failure) and the page.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+
+NAMESPACE = "wigle"
+SELECTOR = "app=wigle-console"
+SECTIONS = ("schedule", "last_run", "pi", "history", "errors", "detections", "wigle")
+PROBE = """
+import json, urllib.request
+def get(path):
+    with urllib.request.urlopen("http://127.0.0.1:5000" + path, timeout=30) as r:
+        return r.status, r.read()
+out = {}
+for path in ("/ready", "/api/status", "/"):
+    try:
+        status, body = get(path)
+        out[path] = {"status": status, "body": body.decode(errors="replace") if path != "/" else len(body)}
+    except Exception as e:
+        out[path] = {"error": f"{type(e).__name__}: {e}"}
+print(json.dumps(out))
+"""
+
+
+def kubectl(*args: str) -> str:
+    return subprocess.run(["kubectl", "-n", NAMESPACE, *args], capture_output=True, text=True, check=True).stdout
+
+
+def check(pod: str) -> list[str]:
+    """What's wrong with one pod; empty when it's fine."""
+    try:
+        got = json.loads(kubectl("exec", pod, "--", "python", "-c", PROBE))
+    except (subprocess.CalledProcessError, ValueError) as e:
+        return [f"could not ask it: {e}"]
+    problems = [f"{path}: {r['error']}" for path, r in got.items() if "error" in r]
+    problems += [f"{path}: HTTP {r['status']}" for path, r in got.items() if r.get("status", 200) != 200]
+    if "body" in got.get("/api/status", {}):
+        status = json.loads(got["/api/status"]["body"])
+        problems += [f"/api/status: no {s} section" for s in SECTIONS if s not in status]
+        for s in SECTIONS:
+            if isinstance(status.get(s), dict) and "error" in status[s]:
+                print(f"  {pod}: note: {s} source offline ({status[s]['error']})")
+    return problems
+
+
+def main() -> int:
+    pods = kubectl("get", "pods", "-l", SELECTOR, "-o", "jsonpath={.items[*].metadata.name}").split()
+    if not pods:
+        print(f"no pods match {SELECTOR} in {NAMESPACE}")
+        return 1
+    failed = 0
+    for pod in pods:
+        problems = check(pod)
+        print(f"{pod}: {'ok' if not problems else 'FAILED'}")
+        for p in problems:
+            print(f"  {p}")
+        failed += bool(problems)
+    print(f"{len(pods) - failed}/{len(pods)} replicas answer")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
