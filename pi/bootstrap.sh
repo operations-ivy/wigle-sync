@@ -49,6 +49,7 @@ udevadm trigger --action=add --subsystem-match=tty
 
 # --- files --------------------------------------------------------------------
 changed_links=0
+changed_journald=0
 while read -r rel; do
     dest="/${rel#./}"
     mode=644
@@ -58,7 +59,13 @@ while read -r rel; do
     echo "installed $dest"
     # A changed .link only renames radios once they're re-plugged or the Pi reboots.
     [[ $dest == /etc/systemd/network/*.link ]] && changed_links=1
+    [[ $dest == /etc/systemd/journald.conf.d/* ]] && changed_journald=1
 done < <(cd "$SRC/rootfs" && find . -type f | sort)
+# journald reads its drop-ins only when it starts; flush moves what's in RAM to disk.
+if (( changed_journald )); then
+    systemctl restart systemd-journald.service
+    journalctl --flush
+fi
 
 # --- the phone AP, retired 2026-10-15 ------------------------------------------
 # Its RTL8188EUS dongle's USB slot went to a long-range Bluetooth dongle. Remove
@@ -148,6 +155,7 @@ check "Prometheus agent running" systemctl is-active prometheus.service
 check "chrony running" systemctl is-active chrony.service
 check "fake-hwclock has a saved time" test -s /etc/fake-hwclock.data
 check "Kismet waits for the clock" sh -c 'systemctl show -p Wants kismet.service | grep -q wait-for-clock.service'
+check "journal kept across reboots" test -d /var/log/journal
 check "gpsd sees a device" sh -c 'timeout 10 gpspipe -w -n 5 2>/dev/null | grep -q "\"class\":\"DEVICES\".*\"path\""'
 (( changed_links )) && echo "note: interface names changed; reboot to apply them"
 (( bt_reboot )) && echo "note: reboot to turn the onboard Bluetooth off (the dongle becomes hci0)"

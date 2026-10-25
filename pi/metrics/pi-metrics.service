@@ -4,3 +4,5 @@ Description=Write the Pi's readings for node-exporter (pi-metrics.py)
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/pi-metrics
+# Kismet's web login, for its capture sources and recent devices (#48).
+LoadCredential=kismet-httpd:/home/zaphod/.kismet/kismet_httpd.conf
