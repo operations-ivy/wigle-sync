@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Argo CD renders this directory with Kustomize (it auto-detects this file and
+# ignores the Application's directory.recurse). Every manifest under
+# k8s_config/ must be listed here, or Argo would prune anything it no longer
+# sees. The two image tags are set once in images: below; the CronJob and the
+# console Deployment carry the bare image name. A release bumps the matching
+# newTag here (plus the version in pyproject.toml) and builds it with Jenkins'
+# build-image job first.
+
+resources:
+  - wigle-namespace.yaml
+  - wigle-sync-cronjob.yaml
+  - console/console-deployment.yaml
+  - console/console-service.yaml
+  - console/console-ingress.yaml
+  - console/console-pdb.yaml
+  - metrics/console-podmonitor.yaml
+  - metrics/brick69-dashboard-configmap.yaml
+  - metrics/wigle-console-dashboard-configmap.yaml
+  - metrics/wigle-sync-dashboard-configmap.yaml
+
+images:
+  - name: whitepatrick/wigle-sync
+    newTag: 0.1.11
+  - name: whitepatrick/wigle-console
+    newTag: 0.1.15
