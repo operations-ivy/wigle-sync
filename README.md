@@ -282,21 +282,20 @@ any device on the home WiFi, phones included, with no setup.
 Locally: port-forward Prometheus (9090) and Loki (3100), then
 `docker compose up wigle-console` and open http://localhost:5000.
 
-## Wardrive atlas (`https://radar.brick.nozdormu.cloud`)
+## Drive replay (`https://radar.brick.nozdormu.cloud`)
 
-The console's second page (`radar.py`, `templates/atlas.html`; also at
-`/radar` on the console's own name): four views of recent drives, as tabs, all
-drawn with [d3](https://d3js.org) (`static/`, served from here, so the page
-loads nothing from the internet):
+The console's second page (`radar.py`, `templates/replay.html`; also at
+`/radar` on the console's own name), drawn with [d3](https://d3js.org)
+(`static/`, served from here, so the page loads nothing from the internet).
+Pick a drive and watch networks appear where and when they were found, with a
+scrubbable timeline, a choice of speeds, and Wi-Fi, BLE and Bluetooth filters
+that apply to the map, the counts and the timeline.
 
-- **Drive replay**: pick a drive and watch networks appear where and when they
-  were found, with a scrubbable timeline and a choice of speeds.
-- **Almanac**: each drive's haul of new and repeat networks, discovery so far,
-  sightings by weekday and hour, distance from the centre, and the mix of
-  types. Clicking a drive focuses the charts below it.
-- **Network city**: every recent drive as a zoomable hexagon density map,
-  filtered by type or to what's new.
-- **Overlap web**: a chord diagram of the networks each pair of drives shares.
+The console's **Almanac** panel (`static/almanac.js`) reads the same data: each
+drive's haul of new and repeat networks, discovery so far, sightings by weekday
+and hour, distance from the centre, and the mix of types. Clicking a drive
+focuses the charts for time, distance and type. `/api/atlas` is only fetched
+the first time the panel is opened.
 
 The data comes from WiGLE, not the Pi: each finished upload has a KML of the
 networks it located (`/file/kml/<transid>`; it answers 406 to
@@ -307,15 +306,15 @@ KML is fetched once and kept.
 - **New to you**: a network not seen on any earlier drive held here. WiGLE's
   KMLs don't say what was new to WiGLE itself, so this is about your own drives.
 - **Older streets**: up to `GHOST_UPLOADS` (60) older uploads, kept only as
-  positions rounded to about 11 m and drawn very faintly under the replay and
-  the city. Networks line the roads they were found on, so the old drives trace
+  positions rounded to about 11 m and drawn very faintly under the replay.
+  Networks line the roads they were found on, so the old drives trace
   the street grid without a map. They're fetched at most
   `RADAR_FETCHES_PER_REFRESH` (5) per 30-minute refresh, to go easy on WiGLE,
   so after a pod restarts they come back over a few hours.
 
 Network names never leave `radar.parse_kml`. Network IDs are only used, as an
-in-memory hash, to tell a first sighting from a repeat and to count what drives
-share; they never reach the page. Positions reach it as metres from the centre,
+in-memory hash, to tell a first sighting from a repeat; they never reach the
+page. Positions reach it as metres from the centre,
 which is the median of the recent contacts (drives start and end at home), or
 `RADAR_CENTER` (`lat,lon`), an optional key in the `wigle-sync-secrets` Secret,
 so home's coordinates never sit in git. `/api/atlas` is built once per refresh

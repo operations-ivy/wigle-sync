@@ -1,4 +1,5 @@
-"""The wardrive atlas's data: where and when recent drives found networks.
+"""Data for the drive replay and the console's Almanac: where and when recent
+drives found networks.
 
 Data comes from WiGLE, not the Pi: each finished upload has a KML of the
 networks it located (/file/kml/<transid>). An upload never changes once
@@ -8,8 +9,8 @@ processed, so each KML is fetched once and kept.
   time and type for each network, plus whether this is the first drive (of
   those held here) that saw it.
 - Up to GHOST_UPLOADS older ones are kept only as coarse positions, for the
-  faint streets under the city and replay views: networks line the roads, so
-  years of drives draw the street grid without a map. They're fetched a few
+  faint streets under the replay: networks line the roads, so years of
+  drives draw the street grid without a map. They're fetched a few
   per refresh, to go easy on WiGLE's API.
 
 Network names never leave parse_kml. Network IDs are only used to tell repeat
@@ -158,11 +159,6 @@ def ghost_cells(cells, center: tuple[float, float]) -> list[int]:
     return [v for cell in sorted(seen) for v in cell]
 
 
-def overlap(keys: list[set]) -> list[list[int]]:
-    """How many networks each pair of drives shares; zero on the diagonal."""
-    return [[0 if a is b else len(a & b) for b in keys] for a in keys]
-
-
 def empty_page() -> dict[str, Any]:
     return {
         "at": 0,
@@ -171,7 +167,6 @@ def empty_page() -> dict[str, Any]:
         "kinds": KINDS,
         "drives": [],
         "points": [],
-        "overlap": [],
         "ghost": [],
         "ghost_drives": 0,
     }
@@ -287,7 +282,6 @@ class Radar:
                 keys = self._keys.get(t, set())
                 firsts[t] = keys - known
                 known |= keys
-            shared = overlap([self._keys.get(t, set()) for t in order])
         if not recent:
             return empty_page()
         points = [p for t in order for p in recent[t]]
@@ -306,7 +300,6 @@ class Radar:
             "kinds": KINDS,
             "drives": drives,
             "points": columns,
-            "overlap": shared,
             "ghost": ghost_cells(cells, center),
             "ghost_drives": ghost_drives,
         }

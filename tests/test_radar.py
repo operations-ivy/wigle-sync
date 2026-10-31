@@ -82,10 +82,6 @@ def test_ghost_cells_merge_neighbours():
     assert all(v % radar.GHOST_CELL_M == 0 for v in out)
 
 
-def test_overlap_counts_shared_networks_and_leaves_the_diagonal_empty():
-    assert radar.overlap([{1, 2}, {2, 3}, {9}]) == [[0, 1, 0], [1, 0, 0], [0, 0, 0]]
-
-
 class FakeResponse:
     def __init__(self, payload):
         self.payload = payload
@@ -162,7 +158,6 @@ def test_a_network_is_new_only_on_the_first_drive_that_saw_it():
     snap = r.build_page(now=1791595202.0)
     assert [(d["date"], d["contacts"], d["new"]) for d in snap["drives"]] == [("2026-10-10", 2, 1), ("2026-10-09", 2, 1)]
     assert sum(sum(c["n"]) for c in snap["points"]) == 2
-    assert snap["overlap"] == [[0, 1], [1, 0]]
     assert snap["ghost_drives"] == 1 and snap["ghost"]
     out = json.dumps(snap)
     assert "fresh" not in out and "mid" not in out and str(radar._key("fresh")) not in out

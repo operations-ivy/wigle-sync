@@ -121,13 +121,20 @@ def test_atlas_api_has_the_drive_and_no_names(client):
     assert "SecretNet" not in body and "AA:BB" not in body
 
 
-def test_the_atlas_is_served_on_its_own_name_with_d3_from_here(client):
+def test_the_replay_is_served_on_its_own_name_with_d3_from_here(client):
     page = client.get("/", headers={"Host": "radar.brick.nozdormu.cloud"}).data
-    assert b"WARDRIVE ATLAS" in page
-    assert b"WARDRIVE ATLAS" in client.get("/radar").data
-    assert b"WARDRIVE ATLAS" not in client.get("/", headers={"Host": "wigle.brick.nozdormu.cloud"}).data
+    assert b"DRIVE REPLAY" in page
+    assert b"DRIVE REPLAY" in client.get("/radar").data
+    assert b"DRIVE REPLAY" not in client.get("/", headers={"Host": "wigle.brick.nozdormu.cloud"}).data
     assert b"//cdn" not in page and b"https://" not in page  # nothing loads from the internet
     assert client.get("/static/d3.v7.9.0.min.js").status_code == 200
+
+
+def test_the_almanac_is_a_panel_on_the_console(client):
+    page = client.get("/", headers={"Host": "wigle.brick.nozdormu.cloud"}).data
+    assert b'id="alm-panel"' in page
+    assert b"/static/d3.v7.9.0.min.js" in page and b"/static/almanac.js" in page
+    assert client.get("/static/almanac.js").status_code == 200
 
 
 def test_atlas_is_sent_gzipped_when_the_browser_takes_it(client):

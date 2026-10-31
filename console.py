@@ -38,7 +38,7 @@ app = Flask(__name__)
 threading.Thread(target=stats.collect, daemon=True).start()
 FlaskInstrumentor().instrument_app(app, excluded_urls="health,ready,metrics")
 
-# The atlas (radar.brick.nozdormu.cloud): each finished upload's KML is fetched
+# The drive replay (radar.brick.nozdormu.cloud) and the Almanac panel: each finished upload's KML is fetched
 # once, so after the first load a refresh is one cheap transactions call.
 RADAR_REFRESH_SECONDS = 1800
 _radar = radar.Radar(
@@ -89,13 +89,13 @@ def prometheus_metrics():
 @app.route("/")
 def console():
     if request.host.startswith("radar."):
-        return render_template("atlas.html")
+        return render_template("replay.html")
     return render_template("console.html")
 
 
 @app.route("/radar")
-def atlas_page():
-    return render_template("atlas.html")
+def replay_page():
+    return render_template("replay.html")
 
 
 @app.route("/api/atlas")
