@@ -40,11 +40,6 @@ a{color:var(--cyan);}
   mix-blend-mode:overlay;
 }
 .wrap{ position:relative; z-index:3; max-width:1240px; margin:0 auto; padding:18px 16px 40px; display:flex; flex-direction:column; gap:14px; }
-/* Desktop: runs (and any faults) on the left, WiGLE on the right, all on one screen.
-   Phones: one column in the same order. */
-.cols{ display:grid; grid-template-columns:minmax(0,1fr); gap:14px; align-items:start; }
-.cols > div{ display:flex; flex-direction:column; gap:14px; min-width:0; }
-@media (min-width:900px){ .cols{ grid-template-columns:minmax(0,3fr) minmax(0,2fr); } }
 
 .hud{
   border:1px solid var(--line-bright); background:linear-gradient(180deg, var(--panel), var(--panel-2));
@@ -132,6 +127,7 @@ th.num, td.num{ text-align:right; }
 .verdict.bad{ color:var(--danger); }
 .verdict.idle{ color:var(--amber); }
 .verdict.info{ color:var(--cyan); }
+.verdict.off{ color:var(--text-faint); }
 
 .toggle{
   margin-top:8px; background:none; border:1px solid var(--line); color:var(--text-faint); font-family:var(--font-mono);
@@ -148,6 +144,10 @@ th.num, td.num{ text-align:right; }
 .fault .detail{ color:var(--text-dim); margin-top:3px; overflow-wrap:anywhere;
                 display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 .fault .count{ color:var(--text-faint); }
+
+/* Run log: its own scroll, so 96 rows don't push the page away. */
+#lg-body{ max-height:420px; overflow:auto; }
+#lg-body th{ position:sticky; top:0; background:var(--panel-2); }
 
 .empty{ font-family:var(--font-mono); font-size:12.5px; color:var(--text-faint); padding:10px 0; }
 .src-err{ font-family:var(--font-mono); font-size:12px; color:var(--danger); overflow-wrap:anywhere; }
@@ -215,37 +215,37 @@ details.panel > summary:focus-visible{ outline:2px solid var(--cyan); outline-of
     </div>
   </header>
 
-  <div class="cols">
-    <div>
-      <section class="panel">
-        <div class="panel-head"><h2>LAST 96H</h2><span class="meta" id="rl-meta"></span></div>
-        <div id="rl-body"></div>
-      </section>
+  <!-- Only shown when something actually went wrong. -->
+  <section class="panel" id="f-panel" hidden>
+    <div class="panel-head"><h2>FAULTS</h2><span class="meta">last 96h</span></div>
+    <div id="f-body"></div>
+  </section>
 
-      <!-- Only shown when something actually went wrong. -->
-      <section class="panel" id="f-panel" hidden>
-        <div class="panel-head"><h2>FAULTS</h2><span class="meta">last 96h</span></div>
-        <div id="f-body"></div>
-      </section>
-    </div>
-
-    <div>
-      <section class="panel">
-        <div class="panel-head"><h2>WIGLE</h2><span class="meta" id="q-meta"></span></div>
-        <div id="q-body"></div>
-      </section>
-    </div>
-  </div>
+  <details class="panel" id="alm-panel">
+    <summary class="panel-head"><h2>ALMANAC</h2><span class="meta" id="alm-meta"></span></summary>
+    <div id="alm-body"></div>
+  </details>
 
   <details class="panel" id="aa-panel">
     <summary class="panel-head"><h2>AFTER ACTION</h2><span class="meta" id="aa-meta"></span></summary>
     <div id="aa-body"></div>
   </details>
 
-  <details class="panel" id="alm-panel">
-    <summary class="panel-head"><h2>ALMANAC</h2><span class="meta" id="alm-meta"></span></summary>
-    <div id="alm-body"></div>
+  <section class="panel">
+    <div class="panel-head"><h2>WIGLE</h2><span class="meta" id="q-meta"></span></div>
+    <div id="q-body"></div>
+  </section>
+
+  <details class="panel" id="lg-panel">
+    <summary class="panel-head"><h2>LOGS</h2><span class="meta" id="lg-meta"></span></summary>
+    <div id="lg-body"></div>
   </details>
+
+  <!-- Disabled: see RUN_STRIP. -->
+  <section class="panel" id="rl-panel" hidden>
+    <div class="panel-head"><h2>LAST 96H</h2><span class="meta" id="rl-meta"></span></div>
+    <div id="rl-body"></div>
+  </section>
 
   <div id="alm-tip" hidden></div>
 
@@ -259,6 +259,7 @@ details.panel > summary:focus-visible{ outline:2px solid var(--cyan); outline-of
   var REFRESH_MS = 30000;
   var QUEUE_ROWS = 5;
   var FAULT_ROWS = 5;
+  var RUN_STRIP = false;  // the LAST 96H strip: disabled, true brings it back
   var state = { data: null, showAllQueue: false, aaIndex: 0 };
 
   function esc(s){
@@ -392,6 +393,31 @@ details.panel > summary:focus-visible{ outline:2px solid var(--cyan); outline-of
       '<span><i style="background:var(--amber)"></i>no internet</span>' +
       '<span><i style="background:var(--danger)"></i>failed</span>' +
       '<span><i style="background:var(--line-bright)"></i>away</span></div>';
+  }
+
+  function runResult(r){
+    return r.failed > 0 ? ["bad", "failed"] : r.uploaded > 0 ? ["ok", "uploaded"]
+      : r.deferred > 0 ? ["idle", "no internet"] : r.pi_online ? ["info", "nothing new"] : ["off", "away"];
+  }
+
+  function renderLogs(d){
+    var h = d.history, body = $("lg-body");
+    if (h.error) { body.innerHTML = srcErr(h); $("lg-meta").textContent = ""; return; }
+    var runs = h.runs.slice(0, 96);
+    if (!runs.length) { body.innerHTML = '<div class="empty">No runs logged in the last 96h.</div>'; $("lg-meta").textContent = ""; return; }
+    function cell(v){ return '<td class="num">' + (v ? num(v) : "—") + '</td>'; }
+    var scrolled = body.scrollTop;  // the 30s refresh shouldn't lose your place
+    body.innerHTML = aaTable(["When", "Result", "#Found", "#Uploaded", "#Held", "#Failed", "#Size", "#Took"], runs.map(function(r){
+      var res = runResult(r);
+      return '<tr><td>' + stamp(r.at) + '</td><td><span class="verdict ' + res[0] + '">' + res[1] + '</span></td>' +
+        cell(r.files_found) + cell(r.uploaded) + cell(r.deferred) + cell(r.failed) +
+        '<td class="num">' + (r.bytes_uploaded ? bytes(r.bytes_uploaded) : "—") + '</td>' +
+        '<td class="num">' + (r.duration_seconds || 0).toFixed(1) + 's</td></tr>';
+    }));
+    body.scrollTop = scrolled;
+    var home = runs.filter(function(r){ return r.pi_online; }).length;
+    var uploaded = runs.reduce(function(s, r){ return s + (r.uploaded || 0); }, 0);
+    $("lg-meta").textContent = "last 96h · " + plural(uploaded, "file") + " uploaded · pi home " + home + "/" + runs.length + " runs";
   }
 
   function rankDelta(now, prev){
@@ -588,15 +614,20 @@ details.panel > summary:focus-visible{ outline:2px solid var(--cyan); outline-of
   }
 
   // Open or shut, as the viewer left it last time.
-  try { $("aa-panel").open = localStorage.getItem("aa-open") === "1"; } catch (e) {}
-  $("aa-panel").addEventListener("toggle", function(){
-    try { localStorage.setItem("aa-open", $("aa-panel").open ? "1" : "0"); } catch (e) {}
-  });
+  function remember(id, key){
+    try { $(id).open = localStorage.getItem(key) === "1"; } catch (e) {}
+    $(id).addEventListener("toggle", function(){
+      try { localStorage.setItem(key, $(id).open ? "1" : "0"); } catch (e) {}
+    });
+  }
+  remember("aa-panel", "aa-open");
+  remember("lg-panel", "lg-open");
 
   /* ---------------- loop ---------------- */
   function render(){
     var d = state.data;
-    renderHud(d); renderRunLog(d); renderWigle(d); renderFaults(d); renderAfterAction(d);
+    renderHud(d); renderWigle(d); renderFaults(d); renderAfterAction(d); renderLogs(d);
+    if (RUN_STRIP) { $("rl-panel").hidden = false; renderRunLog(d); }
     tickCountdown();
   }
 

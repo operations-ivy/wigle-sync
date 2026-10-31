@@ -1,10 +1,10 @@
 // The console's Almanac panel: what the recent drives found, drawn with d3. It
-// shares /api/atlas with the drive replay, fetched the first time it's opened.
+// shares /api/atlas with the drive replay, fetched when the panel first shows.
 (() => {
   "use strict";
 
   const KINDS = [["wifi", "Wi-Fi", "#05d9e8"], ["ble", "BLE", "#9d4edd"], ["bt", "Bluetooth", "#f9c80e"]];
-  const CYAN = "#05d9e8", SEEN = "#3a2a6e";
+  const CYAN = "#05d9e8", SEEN = "#3a2a6e", RETRY_MS = 30000;
   const num = d3.format(","), si = d3.format("~s"), pct = d3.format(".1%");
   const when = d3.timeFormat("%b %-d %H:%M"), day = d3.timeFormat("%b %-d");
   const $ = id => document.getElementById(id);
@@ -172,17 +172,21 @@
       return;
     }
     if (!data.drives.length) {
+      // Right after a rollout the drives are still being fetched.
       $("alm-body").innerHTML = '<div class="empty">No drives yet: they appear once WiGLE has processed an upload.</div>';
+      setTimeout(load, RETRY_MS);
       return;
     }
     draw();
   }
 
-  // Open or shut, as the viewer left it last time, like After Action.
+  // Open unless the viewer shut it last time.
   panel.addEventListener("toggle", () => {
     try { localStorage.setItem("alm-open", panel.open ? "1" : "0"); } catch (e) {}
     if (panel.open && !asked) load();
     if (!panel.open) hideTip();
   });
-  try { panel.open = localStorage.getItem("alm-open") === "1"; } catch (e) {}
+  let open = true;
+  try { open = localStorage.getItem("alm-open") !== "0"; } catch (e) {}
+  panel.open = open;
 })();

@@ -231,10 +231,12 @@ A read-only status page in the same style as chucks-wisdom's console
 (`console.py`, `stats.py`, `templates/console.html`, image built from
 `Dockerfile.web`). Four tiles across the top: next sync, the last sync with the Pi
 (OK, failed, or waiting for the internet) and what it uploaded (files and MB), the
-all-time total (files and MB). Below them, a 96h strip of hourly runs on the left and your WiGLE rank
-plus the latest uploads' processing state on the right (one column on a
-phone). Faults from the sync job appear only when there are any, each distinct
-one once with a count. `/api/status` serves the same data as JSON.
+all-time total (files and MB). Faults from the sync job appear under them only
+when there are any, each distinct one once with a count. Then, down the page:
+the Almanac, After action, your WiGLE rank plus the latest uploads' processing
+state, and **Logs** (collapsed until opened; it remembers), each hourly run of
+the last 96h as a row. The older 96h strip of runs is disabled with `RUN_STRIP`
+in `templates/console.html`. `/api/status` serves the same data as JSON.
 
 **After action** (collapsed until opened; it remembers): a report on each
 recent drive file, newest first, one file at a time (`report.py`). The sync
@@ -294,8 +296,8 @@ that apply to the map, the counts and the timeline.
 The console's **Almanac** panel (`static/almanac.js`) reads the same data: each
 drive's haul of new and repeat networks, discovery so far, sightings by weekday
 and hour, distance from the centre, and the mix of types. Clicking a drive
-focuses the charts for time, distance and type. `/api/atlas` is only fetched
-the first time the panel is opened.
+focuses the charts for time, distance and type. It's open unless you shut it,
+and `/api/atlas` is only fetched once the panel is showing.
 
 The data comes from WiGLE, not the Pi: each finished upload has a KML of the
 networks it located (`/file/kml/<transid>`; it answers 406 to

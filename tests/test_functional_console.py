@@ -137,6 +137,18 @@ def test_the_almanac_is_a_panel_on_the_console(client):
     assert client.get("/static/almanac.js").status_code == 200
 
 
+def test_the_console_runs_almanac_after_action_wigle_logs(client):
+    page = client.get("/", headers={"Host": "wigle.brick.nozdormu.cloud"}).get_data(as_text=True)
+    order = [page.index(f'id="{panel}"') for panel in ("alm-panel", "aa-panel", "q-body", "lg-panel")]
+    assert order == sorted(order)
+
+
+def test_the_run_strip_is_disabled_not_deleted(client):
+    page = client.get("/", headers={"Host": "wigle.brick.nozdormu.cloud"}).get_data(as_text=True)
+    assert '<section class="panel" id="rl-panel" hidden>' in page
+    assert "var RUN_STRIP = false;" in page and "function renderRunLog" in page
+
+
 def test_atlas_is_sent_gzipped_when_the_browser_takes_it(client):
     assert wait_for(lambda: client.get("/api/atlas").get_json()["drives"])
     zipped = client.get("/api/atlas", headers={"Accept-Encoding": "gzip"})
