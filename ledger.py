@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-import structlog
+import brick_observe
 from confluent_kafka import Consumer
 from confluent_kafka import KafkaError
 from confluent_kafka import KafkaException
@@ -29,11 +29,11 @@ from confluent_kafka import OFFSET_BEGINNING
 from confluent_kafka import Producer
 from confluent_kafka import TopicPartition
 
-log = structlog.get_logger()
+log = brick_observe.get_logger(__name__)
 
 TOPIC = "wigle-sync.files"
 # librdkafka's own messages go through stdlib logging, so they're JSON like
-# every other line (observability.init_logging) rather than raw stderr.
+# every other line (brick_observe.init) rather than raw stderr.
 KAFKA_LOG = logging.getLogger("kafka")
 
 

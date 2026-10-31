@@ -170,8 +170,8 @@ def test_metrics_count_requests_radar_and_wigle_without_names(client):
     client.get("/no-such-page")
     assert wait_for(lambda: "wigle_account_rank 1.0" in client.get("/metrics").get_data(as_text=True))
     text = client.get("/metrics").get_data(as_text=True)
-    assert 'wigle_console_http_requests_total{code="200",route="/api/atlas"}' in text
-    assert 'wigle_console_http_requests_total{code="404",route="other"}' in text
+    assert 'http_server_requests_total{code="200",method="GET",route="/api/atlas"}' in text
+    assert 'http_server_requests_total{code="404",method="GET",route="other"}' in text
     assert 'wigle_console_radar_refreshes_total{result="ok"} 1.0' in text
     assert 'wigle_console_radar_drives{layer="recent"} 1.0' in text
     assert "wigle_console_radar_contacts 1.0" in text
@@ -184,5 +184,8 @@ def test_console_logs_each_request_as_fields(client):
         client.get("/health")
     requests = [e for e in logs if e["event"] == "request"]
     # /health is a probe: logged at debug, so at the INFO level it never appears.
-    assert [(e["path"], e["status"], e["log_level"]) for e in requests] == [("/api/status", 200, "info")]
+    assert [(e["path"], e["status"], e["log_level"]) for e in requests] == [
+        ("/api/status", 200, "info"),
+        ("/health", 200, "debug"),
+    ]
     assert requests[0]["method"] == "GET" and requests[0]["duration_ms"] >= 0

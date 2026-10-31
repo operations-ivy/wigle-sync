@@ -14,7 +14,7 @@ import tempfile
 import time
 from pathlib import Path
 
-import structlog
+import brick_observe
 from opentelemetry import trace
 from opentelemetry.trace import Status
 from opentelemetry.trace import StatusCode
@@ -24,18 +24,17 @@ import ledger as ledgers
 import report
 from config import Settings
 from observability import BYTES_TOTAL
-from observability import init_logging
-from observability import init_tracing
 from observability import push_metrics
 from observability import push_totals
 from observability import RunStats
+from observability import SERVICE_NAME
 from observability import UPLOADED_TOTAL
 from pi_client import PiClient
 from pi_client import RemoteFile
 from wigle_client import WigleClient
 from wigle_client import WigleUnreachable
 
-log = structlog.get_logger()
+log = brick_observe.get_logger(__name__)
 tracer = trace.get_tracer(__name__)
 # The log line the console finds the newest report by (stats.after_action).
 REPORT_EVENT = "After-action report"
@@ -322,7 +321,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    init_logging()
+    brick_observe.init(SERVICE_NAME)
     settings = Settings.from_env()
 
     if args.check_auth:
@@ -334,30 +333,27 @@ def main() -> int:
     if args.seed_totals:
         return seed_totals(settings, dry_run=args.dry_run)
 
-    provider = init_tracing()
+    if args.dry_run:
+        os.environ.pop("PUSHGATEWAY_URL", None)  # a rehearsal isn't a run
     stats = RunStats()
     started = time.monotonic()
-    try:
-        with tracer.start_as_current_span("wigle_sync.run") as span:
-            try:
-                run(settings, stats, dry_run=args.dry_run)
-            except Exception as e:
-                # Anything escaping run() (auth failure, missing log dir...) is a failed run.
-                stats.failed += 1
-                span.record_exception(e)
-                span.set_status(Status(StatusCode.ERROR))
-                log.exception("Sync run failed")
-            span.set_attributes(span_attributes(stats))
-            if not stats.succeeded:
-                span.set_status(Status(StatusCode.ERROR))
+    with brick_observe.job(SERVICE_NAME) as job, tracer.start_as_current_span("wigle_sync.run") as span:
+        try:
+            run(settings, stats, dry_run=args.dry_run)
+        except Exception as e:
+            # Anything escaping run() (auth failure, missing log dir...) is a failed run.
+            stats.failed += 1
+            span.record_exception(e)
+            span.set_status(Status(StatusCode.ERROR))
+            log.exception("Sync run failed")
+        span.set_attributes(span_attributes(stats))
+        if not stats.succeeded:
+            span.set_status(Status(StatusCode.ERROR))
+            job.fail(f"{stats.failed} failed")
         stats.duration_seconds = time.monotonic() - started
         log.info("Sync complete", **{**vars(stats), "detections": dict(stats.detections)})
         if not args.dry_run:
             push_metrics(stats, finished_at=time.time(), recount=lambda: wigle_totals(settings))
-    finally:
-        # The pod exits right after this; flush buffered spans or they're lost.
-        if provider is not None:
-            provider.shutdown()
 
     return 0 if stats.succeeded else 1
 

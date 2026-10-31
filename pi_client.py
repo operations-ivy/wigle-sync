@@ -7,11 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import paramiko
-import structlog
+import brick_observe
 
 from config import Settings
 
-log = structlog.get_logger()
+log = brick_observe.get_logger(__name__)
 
 
 @dataclass(frozen=True)

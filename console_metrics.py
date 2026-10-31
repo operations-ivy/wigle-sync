@@ -1,5 +1,5 @@
-"""wigle-console's Prometheus metrics, served at /metrics (console.py):
-requests by route, the radar's refreshes and what it holds, status sections
+"""wigle-console's own Prometheus metrics, served at /metrics with brick-observe's
+http_server_* ones (console.py): the radar's refreshes and what it holds, status sections
 that failed, and the WiGLE account's standing from the console's own cached
 fetch (never a WiGLE call of its own at scrape time).
 
@@ -17,8 +17,6 @@ from prometheus_client import Histogram
 from prometheus_client.core import GaugeMetricFamily
 from prometheus_client.registry import REGISTRY
 
-REQUESTS = Counter("wigle_console_http_requests_total", "HTTP requests served.", ["route", "code"])
-REQUEST_SECONDS = Histogram("wigle_console_http_request_duration_seconds", "Time to answer a request.", ["route"])
 RADAR_REFRESHES = Counter("wigle_console_radar_refreshes_total", "Radar refreshes from WiGLE, by result.", ["result"])
 RADAR_REFRESH_SECONDS = Histogram(
     "wigle_console_radar_refresh_duration_seconds",
