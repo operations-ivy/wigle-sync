@@ -68,7 +68,8 @@ spec:
             memory: 96Mi
           limits:
             cpu: 250m
-            memory: 192Mi
+            # The drives alone hold ~150Mi; 192Mi was OOM-killed on 2026-10-30.
+            memory: 320Mi
         livenessProbe:
           httpGet:
             path: /health

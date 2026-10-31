@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import json
 from datetime import datetime
 from unittest import mock
@@ -48,29 +49,41 @@ def test_drive_dates_come_from_the_transid():
     assert radar.drive_date("weird") == ""
 
 
-def test_projection_bearing_range_and_a_round_radius():
-    # About 990 m north and 990 m east: inside the 1 km ring.
-    points = [(40.0089, -75.0, 100.0, "wifi", 0, True), (40.0, -74.98838, 0.0, "bt", 1, False)]
-    out = radar.project(points, (40.0, -75.0), now=200.0)
-    assert out["radius_m"] == 1000
-    (b1, r1, age1, k1, d1, n1), (b2, r2, age2, k2, d2, n2) = out["contacts"]
-    assert abs(b1) < 0.5 and abs(r1 - 0.99) < 0.01 and age1 == 100 and (k1, d1, n1) == ("wifi", 0, 1)
-    assert abs(b2 - 90) < 0.5 and age2 is None and (k2, d2, n2) == ("bt", 1, 0)
+def test_drive_columns_are_metres_from_the_centre_oldest_first():
+    points = [
+        (40.0, -74.98838, 1100.0, "bt", 2),  # about 990 m east, later
+        (40.0089, -75.0, 1000.0, "wifi", 1),  # about 990 m north, first
+    ]
+    summary, cols = radar.drive_columns(points, {1}, (40.0, -75.0))
+    assert summary == {"start": 1000, "end": 1100, "kinds": {"wifi": 1, "ble": 0, "bt": 1}}
+    assert cols["t"] == [0, 100] and cols["k"] == [0, 2] and cols["n"] == [1, 0]
+    assert cols["x"][0] == 0 and 980 < cols["y"][0] < 1000
+    assert 980 < cols["x"][1] < 1000 and cols["y"][1] == 0
 
 
-def test_radius_holds_ninety_percent_and_drops_the_far_ones():
-    near = [(40.0 + i * 0.0001, -75.0, 0.0, "wifi", 0, False) for i in range(10)]  # within ~100 m
-    far = [(41.0, -75.0, 0.0, "wifi", 0, False)]  # ~111 km out
-    out = radar.project(near + far, (40.0, -75.0), now=0)
-    assert out["radius_m"] == 500
-    assert len(out["contacts"]) == 10
+def test_a_clock_step_doesnt_stretch_the_drive():
+    day = 86400.0
+    early = [(40.0, -75.0, 5000.0 + i, "wifi", i) for i in range(20)]  # before the clock was set
+    drive = [(40.0, -75.0, 7 * day + i, "wifi", 100 + i) for i in range(200)]
+    late = [(40.0, -75.0, 20 * day, "wifi", 999)]
+    summary, cols = radar.drive_columns(early + drive + late, set(), (40.0, -75.0))
+    assert (summary["start"], summary["end"]) == (7 * day, 7 * day + 199)
+    assert cols["t"] == sorted(cols["t"]) and cols["t"][0] == 0 and cols["t"][-1] == 199
 
 
-def test_ghost_cells_merge_neighbours_and_skip_what_is_off_the_scope():
-    cells = {(40.0050, -75.0), (40.00501, -75.0), (40.0, -74.99), (41.0, -75.0)}
-    out = radar.ghost(cells, (40.0, -75.0), radius_m=1000)
-    assert len(out) == 2  # the two neighbours merge; 111 km is off the scope
-    assert all(0 <= b < 360 and 0 <= r <= 1 for b, r in out)
+def test_a_point_with_no_time_starts_the_drive_and_an_unknown_type_counts_as_wifi():
+    summary, cols = radar.drive_columns([(40.0, -75.0, 0.0, "gsm", 0)], set(), (40.0, -75.0))
+    assert summary["kinds"]["wifi"] == 1 and cols["t"] == [0] and cols["k"] == [0]
+
+
+def test_ghost_cells_merge_neighbours():
+    out = radar.ghost_cells({(40.0050, -75.0), (40.00501, -75.0), (40.0, -74.99)}, (40.0, -75.0))
+    assert len(out) == 4  # the two neighbours are one cell: two [x, y] pairs, flat
+    assert all(v % radar.GHOST_CELL_M == 0 for v in out)
+
+
+def test_overlap_counts_shared_networks_and_leaves_the_diagonal_empty():
+    assert radar.overlap([{1, 2}, {2, 3}, {9}]) == [[0, 1, 0], [1, 0, 0], [0, 0, 0]]
 
 
 class FakeResponse:
@@ -146,20 +159,21 @@ def test_a_network_is_new_only_on_the_first_drive_that_saw_it():
         mock.patch.object(radar, "RADAR_UPLOADS", 2),
     ):
         r.refresh()
-    snap = r.snapshot(now=1791595202.0)
-    assert snap["drives"] == [
-        {"date": "2026-10-10", "contacts": 2, "new": 1},
-        {"date": "2026-10-09", "contacts": 2, "new": 1},
-    ]
-    assert sum(c[5] for c in snap["contacts"]) == 2
+    snap = r.build_page(now=1791595202.0)
+    assert [(d["date"], d["contacts"], d["new"]) for d in snap["drives"]] == [("2026-10-10", 2, 1), ("2026-10-09", 2, 1)]
+    assert sum(sum(c["n"]) for c in snap["points"]) == 2
+    assert snap["overlap"] == [[0, 1], [1, 0]]
     assert snap["ghost_drives"] == 1 and snap["ghost"]
     out = json.dumps(snap)
     assert "fresh" not in out and "mid" not in out and str(radar._key("fresh")) not in out
+    assert "40.00" not in out and "-75.0" not in out  # metres from the centre, never coordinates
 
 
 def test_empty_radar_is_still_a_valid_answer():
-    snap = radar.Radar(("a", "b")).snapshot()
-    assert (snap["contacts"], snap["drives"], snap["ghost"], snap["total"]) == ([], [], [], 0)
+    r = radar.Radar(("a", "b"))
+    assert json.loads(gzip.decompress(r.page_gz()))["drives"] == []
+    snap = r.build_page()
+    assert (snap["points"], snap["drives"], snap["ghost"]) == ([], [], [])
 
 
 def test_first_load_counts_as_done_even_when_wigle_fails():
@@ -183,6 +197,6 @@ def test_a_failed_fetch_partway_still_shows_what_loaded():
     r = radar.Radar(("name", "token"))
     with mock.patch.object(radar.requests, "get", side_effect=flaky), mock.patch.object(radar, "RADAR_UPLOADS", 2):
         r.refresh_safely()
-    snap = r.snapshot(now=1791595202.0)
+    snap = json.loads(gzip.decompress(r.page_gz()))  # published even though the refresh failed
     assert [d["date"] for d in snap["drives"]] == ["2026-10-10", "2026-10-09"]
     assert snap["ghost_drives"] == 0 and r.first_load_done.is_set()
