@@ -3,6 +3,7 @@ threads, against one stub server playing Prometheus, Loki and WiGLE."""
 
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import threading
@@ -112,19 +113,35 @@ def test_health_and_readiness(client):
     assert wait_for(lambda: client.get("/ready").status_code == 200), "never became ready"
 
 
-def test_radar_api_has_the_drive_and_no_names(client):
-    assert wait_for(lambda: client.get("/api/radar").get_json()["drives"])
-    snap = client.get("/api/radar").get_json()
-    assert snap["drives"] == [{"date": "2026-10-09", "contacts": 1, "new": 1}]
-    assert snap["total"] == 1
-    body = client.get("/api/radar").get_data(as_text=True)
+def test_atlas_api_has_the_drive_and_no_names(client):
+    assert wait_for(lambda: client.get("/api/atlas").get_json()["drives"])
+    snap = client.get("/api/atlas").get_json()
+    assert [(d["date"], d["contacts"], d["new"]) for d in snap["drives"]] == [("2026-10-09", 1, 1)]
+    body = client.get("/api/atlas").get_data(as_text=True)
     assert "SecretNet" not in body and "AA:BB" not in body
 
 
-def test_the_radar_page_is_served_on_its_own_name(client):
-    assert b"WARDRIVE RADAR" in client.get("/", headers={"Host": "radar.brick.nozdormu.cloud"}).data
-    assert b"WARDRIVE RADAR" in client.get("/radar").data
-    assert b"WARDRIVE RADAR" not in client.get("/", headers={"Host": "wigle.brick.nozdormu.cloud"}).data
+def test_the_replay_is_served_on_its_own_name_with_d3_from_here(client):
+    page = client.get("/", headers={"Host": "radar.brick.nozdormu.cloud"}).data
+    assert b"DRIVE REPLAY" in page
+    assert b"DRIVE REPLAY" in client.get("/radar").data
+    assert b"DRIVE REPLAY" not in client.get("/", headers={"Host": "wigle.brick.nozdormu.cloud"}).data
+    assert b"//cdn" not in page and b"https://" not in page  # nothing loads from the internet
+    assert client.get("/static/d3.v7.9.0.min.js").status_code == 200
+
+
+def test_the_almanac_is_a_panel_on_the_console(client):
+    page = client.get("/", headers={"Host": "wigle.brick.nozdormu.cloud"}).data
+    assert b'id="alm-panel"' in page
+    assert b"/static/d3.v7.9.0.min.js" in page and b"/static/almanac.js" in page
+    assert client.get("/static/almanac.js").status_code == 200
+
+
+def test_atlas_is_sent_gzipped_when_the_browser_takes_it(client):
+    assert wait_for(lambda: client.get("/api/atlas").get_json()["drives"])
+    zipped = client.get("/api/atlas", headers={"Accept-Encoding": "gzip"})
+    assert zipped.headers["Content-Encoding"] == "gzip"
+    assert gzip.decompress(zipped.data) == client.get("/api/atlas").data
 
 
 def test_status_api_reads_loki_and_wigle(client):
@@ -136,12 +153,12 @@ def test_status_api_reads_loki_and_wigle(client):
 
 
 def test_metrics_count_requests_radar_and_wigle_without_names(client):
-    assert wait_for(lambda: client.get("/api/radar").get_json()["drives"])
+    assert wait_for(lambda: client.get("/api/atlas").get_json()["drives"])
     client.get("/api/status")
     client.get("/no-such-page")
     assert wait_for(lambda: "wigle_account_rank 1.0" in client.get("/metrics").get_data(as_text=True))
     text = client.get("/metrics").get_data(as_text=True)
-    assert 'wigle_console_http_requests_total{code="200",route="/api/radar"}' in text
+    assert 'wigle_console_http_requests_total{code="200",route="/api/atlas"}' in text
     assert 'wigle_console_http_requests_total{code="404",route="other"}' in text
     assert 'wigle_console_radar_refreshes_total{result="ok"} 1.0' in text
     assert 'wigle_console_radar_drives{layer="recent"} 1.0' in text

@@ -1,4 +1,5 @@
-"""The wardriving radar: where recent drives found networks, around home.
+"""Data for the drive replay and the console's Almanac: where and when recent
+drives found networks.
 
 Data comes from WiGLE, not the Pi: each finished upload has a KML of the
 networks it located (/file/kml/<transid>). An upload never changes once
@@ -6,23 +7,29 @@ processed, so each KML is fetched once and kept.
 
 - The newest RADAR_UPLOADS uploads ("drives") are kept in full: position,
   time and type for each network, plus whether this is the first drive (of
-  those the radar holds) that saw it.
+  those held here) that saw it.
 - Up to GHOST_UPLOADS older ones are kept only as coarse positions, for the
-  faint "ghost streets" under the scope: networks line the roads, so years of
-  drives draw the street grid without a map. They're fetched a few per
-  refresh, to go easy on WiGLE's API.
+  faint streets under the replay: networks line the roads, so years of
+  drives draw the street grid without a map. They're fetched a few
+  per refresh, to go easy on WiGLE's API.
 
 Network names never leave parse_kml. Network IDs are only used to tell repeat
 sightings from first ones, as an in-memory hash, and never leave this module.
+Positions leave as metres from the centre, never as coordinates.
 
 The centre is the median of the recent contacts (drives start and end at
 home), or RADAR_CENTER ("lat,lon", from the wigle-sync Secret) when set.
+
+The page's JSON is built once per refresh and kept gzipped: building it on
+request OOM-killed a 192Mi pod (2026-10-30).
 """
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import html
+import json
 import math
 import os
 import re
@@ -45,10 +52,15 @@ GHOST_UPLOADS = int(os.environ.get("GHOST_UPLOADS", "60"))
 # New KMLs fetched per refresh beyond the recent drives, so filling the ghost
 # layer takes a few refreshes instead of one burst against WiGLE.
 FETCHES_PER_REFRESH = int(os.environ.get("RADAR_FETCHES_PER_REFRESH", "5"))
-# Ranges the scope snaps to, so the rings read as round numbers.
-NICE_RADII_M = [500, 1000, 2000, 3000, 5000, 10000, 20000, 50000, 100000]
-# The ghost layer is quantised to this many cells across the scope's radius.
-GHOST_CELLS = 300
+# The page's first view holds this share of the contacts.
+VIEW_SHARE = 0.95
+# The ghost layer is quantised to cells this wide.
+GHOST_CELL_M = 25
+# A gap this long in a drive's timestamps is a clock step, not a stop: brick69
+# has no RTC and has started days behind (wigle-sync#44 fixed that for new
+# drives). The drive's time is its largest unbroken run.
+CLOCK_GAP_S = 6 * 3600
+KINDS = ("wifi", "ble", "bt")
 EARTH_M = 6371000
 
 _PLACEMARK = re.compile(r"<Placemark>(.*?)</Placemark>", re.S)
@@ -97,46 +109,67 @@ def drive_date(transid: str) -> str:
     return f"{m.group(1)}-{m.group(2)}-{m.group(3)}" if m else ""
 
 
-def _polar(lat: float, lon: float, lat0: float, lon0: float) -> tuple[float, float]:
+def _metres(lat: float, lon: float, lat0: float, lon0: float) -> tuple[int, int]:
+    """East and north of the centre (radians), in whole metres."""
     la, lo = math.radians(lat), math.radians(lon)
-    x = (lo - lon0) * math.cos((la + lat0) / 2) * EARTH_M
-    y = (la - lat0) * EARTH_M
-    return math.degrees(math.atan2(x, y)) % 360, math.hypot(x, y)
+    return round((lo - lon0) * math.cos((la + lat0) / 2) * EARTH_M), round((la - lat0) * EARTH_M)
 
 
-def project(points, center, now: float) -> dict[str, Any]:
-    """Bearing (degrees from north), range (0..1 of the radius), age, type,
-    drive and first-seen flag for each point, with a radius that holds 90%
-    of them. Points are (lat, lon, seen, kind, drive, new)."""
-    if not points:
-        return {"radius_m": NICE_RADII_M[1], "contacts": []}
+def main_run(times: list[float]) -> tuple[float, float]:
+    """The first and last of the largest run of sorted times with no clock gap."""
+    if not times:
+        return 0.0, 0.0
+    runs, first = [], 0
+    for i in range(1, len(times)):
+        if times[i] - times[i - 1] > CLOCK_GAP_S:
+            runs.append((i - first, first, i - 1))
+            first = i
+    runs.append((len(times) - first, first, len(times) - 1))
+    _, a, b = max(runs)
+    return times[a], times[b]
+
+
+def drive_columns(points, firsts: set[int], center: tuple[float, float]) -> tuple[dict[str, Any], dict[str, list]]:
+    """One drive's summary and its points as columns: x, y (metres from the
+    centre), t (seconds from the drive's start), k (index into KINDS), n (new)."""
     lat0, lon0 = map(math.radians, center)
-    polar = [(*_polar(p[0], p[1], lat0, lon0), *p[2:]) for p in points]
-    dists = sorted(p[1] for p in polar)
-    p90 = dists[int(0.9 * (len(dists) - 1))]
-    radius = next((r for r in NICE_RADII_M if r >= p90), NICE_RADII_M[-1])
-    contacts = [
-        [round(b, 1), round(d / radius, 3), max(0, round(now - s)) if s else None, k, drive, int(new)]
-        for b, d, s, k, drive, new in polar
-        if d <= radius
-    ]
-    return {"radius_m": radius, "contacts": contacts}
+    start, end = main_run(sorted(p[2] for p in points if p[2]))
+    cols: dict[str, list] = {"x": [], "y": [], "t": [], "k": [], "n": []}
+    kinds = dict.fromkeys(KINDS, 0)
+    # Clamped times included, so the page can bisect on t.
+    for lat, lon, seen, kind, key in sorted(points, key=lambda p: min(max(p[2], start), end)):
+        x, y = _metres(lat, lon, lat0, lon0)
+        kind = kind if kind in kinds else "wifi"
+        kinds[kind] += 1
+        cols["x"].append(x)
+        cols["y"].append(y)
+        cols["t"].append(round(min(max(0.0, seen - start), end - start)) if seen else 0)
+        cols["k"].append(KINDS.index(kind))
+        cols["n"].append(int(key in firsts))
+    return {"start": round(start), "end": round(end), "kinds": kinds}, cols
 
 
-def ghost(cells, center, radius_m: float) -> list[list[float]]:
-    """The older drives' positions as unique scope cells: [bearing, range]."""
+def ghost_cells(cells, center: tuple[float, float]) -> list[int]:
+    """Older drives' positions as unique cells, flat: [x, y, x, y, ...] metres."""
     lat0, lon0 = map(math.radians, center)
     seen = set()
     for lat, lon in cells:
-        b, d = _polar(lat, lon, lat0, lon0)
-        if d > radius_m:
-            continue
-        r = d / radius_m
-        # Cells of roughly equal size: finer in angle further out.
-        ring = round(r * GHOST_CELLS)
-        step = 360 / max(6, round(2 * math.pi * ring))
-        seen.add((round(round(b / step) * step, 2) % 360, round(ring / GHOST_CELLS, 4)))
-    return [list(c) for c in sorted(seen)]
+        x, y = _metres(lat, lon, lat0, lon0)
+        seen.add((round(x / GHOST_CELL_M) * GHOST_CELL_M, round(y / GHOST_CELL_M) * GHOST_CELL_M))
+    return [v for cell in sorted(seen) for v in cell]
+
+
+def empty_page() -> dict[str, Any]:
+    return {
+        "at": 0,
+        "centered": "none",
+        "view_m": 1000,
+        "kinds": KINDS,
+        "drives": [],
+        "points": [],
+        "ghost": [],
+        "ghost_drives": 0,
+    }
 
 
 class Radar:
@@ -148,9 +181,7 @@ class Radar:
         self._ghost: dict[str, set] = {}  # transid -> {(lat, lon) at ~11 m}, older drives
         self._keys: dict[str, set] = {}  # transid -> network keys, for first sightings
         self._order: list[str] = []  # every kept transid, newest first
-        # snapshot() is the costly part (every ghost cell projected), and the
-        # data only changes on refresh: recompute when the order changes.
-        self._snap: tuple[tuple, dict] | None = None
+        self._page = gzip.compress(json.dumps(empty_page()).encode())  # gzipped JSON, see build_page()
         # Set once the first refresh has finished, whether or not WiGLE
         # answered: the pod's readiness waits for it (console.py /ready).
         self.first_load_done = threading.Event()
@@ -217,6 +248,11 @@ class Radar:
             log.warning("Radar refresh failed", error=str(e))
             console_metrics.RADAR_REFRESHES.labels("error").inc()
         finally:
+            # Whatever did load before a failure still reaches the page.
+            try:
+                self.publish()
+            except Exception as e:
+                log.warning("Radar page build failed", error=str(e))
             console_metrics.RADAR_REFRESH_SECONDS.observe(time.monotonic() - started)
             self.first_load_done.set()
 
@@ -229,15 +265,13 @@ class Radar:
                 "contacts": sum(len(p) for p in self._recent.values()),
             }
 
-    def snapshot(self, now: float | None = None) -> dict[str, Any]:
+    def build_page(self, now: float | None = None) -> dict[str, Any]:
         now = time.time() if now is None else now
         with self._lock:
-            version = (tuple(self._order), len(self._ghost))
-            if self._snap and self._snap[0] == version and now - self._snap[1].get("at", 0) < 300:
-                return self._snap[1]
             order = [t for t in self._order if t in self._recent]
             recent = {t: self._recent[t] for t in order}
-            ghost_cells = {c for cells in self._ghost.values() for c in cells}
+            cells = {c for layer in self._ghost.values() for c in layer}
+            ghost_drives = len(self._ghost)
             # Oldest first, so a network counts as new on the first drive that saw it.
             known: set[int] = set()
             for t in reversed(self._order):
@@ -248,30 +282,31 @@ class Radar:
                 keys = self._keys.get(t, set())
                 firsts[t] = keys - known
                 known |= keys
-        empty = {
-            "radius_m": NICE_RADII_M[1],
-            "contacts": [],
-            "drives": [],
-            "ghost": [],
-            "total": 0,
-            "ghost_drives": 0,
-            "centered": "none",
-        }
         if not recent:
-            return empty
-        points = [(p[0], p[1], p[2], p[3], i, p[4] in firsts[t]) for i, t in enumerate(order) for p in recent[t]]
+            return empty_page()
+        points = [p for t in order for p in recent[t]]
         center = self.center or (statistics.median(p[0] for p in points), statistics.median(p[1] for p in points))
-        projected = project(points, center, now)
-        drives = [{"date": drive_date(t), "contacts": len(recent[t]), "new": len(firsts[t])} for t in order]
-        snap = {
-            **projected,
-            "drives": drives,
-            "total": len(points),
-            "ghost": ghost(ghost_cells, center, projected["radius_m"]),
-            "ghost_drives": len(self._ghost),
+        drives, columns = [], []
+        for t in order:
+            summary, cols = drive_columns(recent[t], firsts[t], center)
+            drives.append({"date": drive_date(t), "contacts": len(recent[t]), "new": len(firsts[t]), **summary})
+            columns.append(cols)
+        lat0, lon0 = map(math.radians, center)
+        dists = sorted(math.hypot(*_metres(p[0], p[1], lat0, lon0)) for p in points)
+        return {
+            "at": round(now),
             "centered": "home" if self.center else "median",
-            "at": now,
+            "view_m": round(dists[int(VIEW_SHARE * (len(dists) - 1))]),
+            "kinds": KINDS,
+            "drives": drives,
+            "points": columns,
+            "ghost": ghost_cells(cells, center),
+            "ghost_drives": ghost_drives,
         }
-        with self._lock:
-            self._snap = (version, snap)
-        return snap
+
+    def publish(self) -> None:
+        page = gzip.compress(json.dumps(self.build_page(), separators=(",", ":")).encode())
+        self._page = page
+
+    def page_gz(self) -> bytes:
+        return self._page

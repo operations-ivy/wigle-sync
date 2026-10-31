@@ -180,6 +180,14 @@ details.panel > summary:focus-visible{ outline:2px solid var(--cyan); outline-of
 .hist .b:hover{ filter:brightness(1.4); }
 .note{ font-family:var(--font-mono); font-size:11px; color:var(--text-faint); margin-top:4px; }
 
+/* Almanac: d3 charts, in static/almanac.js. */
+#alm-body svg{ display:block; width:100%; height:auto; }
+#alm-body svg text{ fill:var(--text-dim); font-family:var(--font-mono); font-size:10.5px; }
+#alm-body .ax line{ stroke:var(--line); }
+#alm-body .pick{ cursor:pointer; }
+#alm-tip{ position:fixed; z-index:5; pointer-events:none; background:var(--bg); color:var(--text); border:1px solid var(--line-bright);
+          border-radius:4px; padding:5px 9px; font-family:var(--font-mono); font-size:12px; max-width:280px; }
+
 @media (prefers-reduced-motion: reduce){ .hud::before{ animation:none; } }
 </style>
 </head>
@@ -233,6 +241,13 @@ details.panel > summary:focus-visible{ outline:2px solid var(--cyan); outline-of
     <summary class="panel-head"><h2>AFTER ACTION</h2><span class="meta" id="aa-meta"></span></summary>
     <div id="aa-body"></div>
   </details>
+
+  <details class="panel" id="alm-panel">
+    <summary class="panel-head"><h2>ALMANAC</h2><span class="meta" id="alm-meta"></span></summary>
+    <div id="alm-body"></div>
+  </details>
+
+  <div id="alm-tip" hidden></div>
 
   <footer>Refreshes every 30s · <a href="https://grafana.brick.nozdormu.cloud/d/wigle-sync">Grafana → WiGLE Sync</a></footer>
 </div>
@@ -611,5 +626,7 @@ details.panel > summary:focus-visible{ outline:2px solid var(--cyan); outline-of
   setInterval(load, REFRESH_MS);
 })();
 </script>
+<script src="{{ url_for('static', filename='d3.v7.9.0.min.js') }}" defer></script>
+<script src="{{ url_for('static', filename='almanac.js') }}" defer></script>
 </body>
 </html>
