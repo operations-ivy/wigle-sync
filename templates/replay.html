@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drive replay</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --surface: #1a1a19; --surface-2: #242423; --line: #3a3a37;
+    --ink: #f0efec; --ink-2: #c3c2b7; --ink-3: #94938a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--surface); color: var(--ink);
+               font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; padding: 12px 16px;
+           border-bottom: 1px solid var(--line); }
+  h1 { font-size: 16px; letter-spacing: .08em; margin: 0; font-weight: 700; }
+  #sub { color: var(--ink-3); font-size: 13px; margin-left: auto; }
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  #replay { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  #replay[hidden] { display: none; }
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 16px; }
+  .bar label { color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px; }
+  select, button.ctl { background: var(--surface-2); color: var(--ink); border: 1px solid var(--line);
+                       border-radius: 6px; font: inherit; padding: 5px 10px; min-height: 34px; }
+  button.ctl { cursor: pointer; min-width: 76px; }
+  #kinds { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; }
+  #kinds label { min-height: 34px; cursor: pointer; }
+  #kinds input { margin: 0; accent-color: var(--ink-2); }
+  #kinds i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+  #kinds label:has(input:not(:checked)) { color: var(--ink-3); }
+  #kinds label:has(input:not(:checked)) i { opacity: .3; }
+  .stage { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+  .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+  .stage canvas:active { cursor: grabbing; }
+  .readout { position: absolute; top: 12px; left: 16px; pointer-events: none; text-shadow: 0 0 6px #000, 0 0 2px #000; }
+  .readout b { display: block; font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .readout span { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .scale { position: absolute; bottom: 12px; right: 16px; color: var(--ink-2); font-size: 12px; text-align: center;
+           pointer-events: none; }
+  .scale div { border: solid var(--ink-2); border-width: 0 1px 1px; height: 5px; margin-top: 2px; }
+  #timeline { height: 64px; padding: 0 16px 6px; }
+  #timeline svg { display: block; width: 100%; height: 100%; cursor: ew-resize; touch-action: none; }
+  svg text { fill: var(--ink-2); font-size: 11px; }
+  .axis path, .axis line { stroke: var(--line); }
+  #msg { padding: 40px 16px; color: var(--ink-2); text-align: center; }
+  @media (max-width: 600px) { #sub { margin-left: 0; width: 100%; order: 3; } .readout b { font-size: 20px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>DRIVE REPLAY</h1>
+  <div id="sub"></div>
+</header>
+<main>
+  <div id="msg">Loading drives…</div>
+
+  <section id="replay" hidden>
+    <div class="bar">
+      <label>Drive <select id="drive"></select></label>
+      <button class="ctl" id="play">Play</button>
+      <label>Speed <select id="speed">
+        <option value="30">30×</option><option value="60" selected>60×</option>
+        <option value="120">120×</option><option value="300">300×</option>
+      </select></label>
+      <span id="kinds" role="group" aria-label="Network types to show"></span>
+    </div>
+    <div class="stage" id="replay-stage">
+      <canvas aria-label="Networks appearing along the drive, over the street grid of older drives"></canvas>
+      <div class="readout"><b id="r-clock"></b><span id="r-count"></span></div>
+      <div class="scale"></div>
+    </div>
+    <div id="timeline"></div>
+  </section>
+</main>
+
+<script src="{{ url_for('static', filename='d3.v7.9.0.min.js') }}"></script>
+<script>
+"use strict";
+const KIND_COLOUR = ["#3987e5", "#d95926", "#199e70"];
+const KIND_LABEL = ["Wi-Fi", "BLE", "Bluetooth"];
+const num = d3.format(",");
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let data = null, ghost = [];
+
+function km(m) { return m >= 1000 ? `${+(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`; }
+const when = d3.timeFormat("%b %-d, %-I:%M %p"), clock = d3.timeFormat("%-I:%M:%S %p");
+function driveName(d) { return d.start ? when(new Date(d.start * 1000)) : d.date; }
+
+// A canvas that fills its stage, pans and zooms, and maps metres to pixels ----
+function stage(id, onDraw) {
+  const root = document.getElementById(id), cv = root.querySelector("canvas"), g = cv.getContext("2d");
+  const s = { root, cv, g, w: 0, h: 0, ratio: 1, k: 1, tx: 0, ty: 0, fit: 1 };
+  s.resize = () => {
+    s.ratio = devicePixelRatio || 1; s.w = root.clientWidth; s.h = root.clientHeight;
+    cv.width = s.w * s.ratio; cv.height = s.h * s.ratio;
+  };
+  s.frame = view => { s.resize(); s.fit = Math.min(s.w, s.h) / 2 / Math.max(view, 100) * .94; onDraw(); };
+  s.x = m => s.w / 2 + s.tx + m * s.fit * s.k;
+  s.y = m => s.h / 2 + s.ty - m * s.fit * s.k;
+  s.scale = () => {
+    const metres = 120 / (s.fit * s.k), nice = d3.tickStep(0, metres, 1);
+    root.querySelector(".scale").innerHTML = `${km(nice)}<div style="width:${nice * s.fit * s.k}px"></div>`;
+  };
+  d3.select(cv).call(d3.zoom().scaleExtent([.5, 60]).on("zoom", e => {
+    s.k = e.transform.k; s.tx = e.transform.x; s.ty = e.transform.y; onDraw();
+  }));
+  s.reset = () => { d3.select(cv).call(d3.zoom().transform, d3.zoomIdentity); s.k = 1; s.tx = s.ty = 0; };
+  new ResizeObserver(() => { if (s.w && root.clientWidth && (s.w !== root.clientWidth || s.h !== root.clientHeight)) { s.resize(); onDraw(); } }).observe(root);
+  return s;
+}
+function drawGhost(s, g, alpha) {
+  g.fillStyle = `rgba(195, 194, 183, ${alpha})`;
+  const size = Math.max(1, Math.min(4, 25 * s.fit * s.k));
+  for (let i = 0; i < ghost.length; i += 2) {
+    const x = s.x(ghost[i]), y = s.y(ghost[i + 1]);
+    if (x >= 0 && y >= 0 && x <= s.w && y <= s.h) g.fillRect(x, y, size, size);
+  }
+}
+
+// The replay ------------------------------------------------------------------
+const replay = (() => {
+  let s, drive = 0, cols = null, duration = 1, cursor = 0, playing = false, last = 0, painted = 0;
+  const layer = document.createElement("canvas");
+  const PULSE = 45, tl = {}, shown = [true, true, true];
+
+  function view(c) {
+    const r = Array.from(c.x, (x, i) => Math.hypot(x, c.y[i])).sort(d3.ascending);
+    return r[Math.floor(.98 * (r.length - 1))] || 1000;
+  }
+  function paintTo(idx) {
+    const g = layer.getContext("2d");
+    if (layer.width !== s.cv.width || layer.height !== s.cv.height) { layer.width = s.cv.width; layer.height = s.cv.height; painted = 0; }
+    if (idx < painted || painted === 0) { g.setTransform(s.ratio, 0, 0, s.ratio, 0, 0); g.clearRect(0, 0, s.w, s.h); drawGhost(s, g, .16); painted = 0; }
+    g.setTransform(s.ratio, 0, 0, s.ratio, 0, 0);
+    for (let i = painted; i < idx; i++) {
+      if (!shown[cols.k[i]]) continue;
+      g.fillStyle = KIND_COLOUR[cols.k[i]]; g.globalAlpha = cols.n[i] ? .85 : .4;
+      const r = cols.n[i] ? 1.6 : 1;
+      g.beginPath(); g.arc(s.x(cols.x[i]), s.y(cols.y[i]), r, 0, 7); g.fill();
+    }
+    g.globalAlpha = 1; painted = idx;
+  }
+  function draw() {
+    if (!cols) return;
+    const idx = d3.bisectRight(cols.t, cursor), g = s.g;
+    paintTo(idx);
+    g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, s.cv.width, s.cv.height); g.drawImage(layer, 0, 0);
+    g.setTransform(s.ratio, 0, 0, s.ratio, 0, 0);
+    // What's just been heard rings outward, and the newest few mark the car:
+    // every type does that, so the car keeps moving with a type filtered out.
+    let sx = 0, sy = 0, c = 0;
+    for (let i = idx - 1; i >= 0 && cursor - cols.t[i] < PULSE; i--) {
+      const age = (cursor - cols.t[i]) / PULSE, x = s.x(cols.x[i]), y = s.y(cols.y[i]);
+      if (shown[cols.k[i]]) {
+        g.strokeStyle = KIND_COLOUR[cols.k[i]]; g.globalAlpha = (1 - age) * .9; g.lineWidth = 1.5;
+        g.beginPath(); g.arc(x, y, 2 + age * (cols.n[i] ? 16 : 9), 0, 7); g.stroke();
+      }
+      if (c < 24) { sx += x; sy += y; c++; }
+    }
+    g.globalAlpha = 1;
+    if (c) {
+      g.fillStyle = "#f0efec"; g.strokeStyle = "#1a1a19"; g.lineWidth = 2;
+      g.beginPath(); g.arc(sx / c, sy / c, 6, 0, 7); g.fill(); g.stroke();
+    }
+    let total = 0, fresh = 0; const kinds = [0, 0, 0];
+    for (let i = 0; i < idx; i++) if (shown[cols.k[i]]) { total++; fresh += cols.n[i]; kinds[cols.k[i]]++; }
+    const d = data.drives[drive];
+    document.getElementById("r-clock").textContent = d.start ? clock(new Date((d.start + cursor) * 1000)) : "";
+    document.getElementById("r-count").textContent = [`${num(total)} networks, ${num(fresh)} new`,
+      ...KIND_LABEL.flatMap((l, i) => shown[i] ? [`${num(kinds[i])} ${l}`] : [])].join(" · ");
+    if (tl.head) tl.head.attr("x1", tl.x(cursor)).attr("x2", tl.x(cursor));
+    s.scale();
+  }
+  function timeline() {
+    const box = document.getElementById("timeline"), w = box.clientWidth - 32, h = 58, m = { b: 16 };
+    box.innerHTML = "";
+    const svg = d3.select(box).append("svg").attr("viewBox", `0 0 ${w} ${h}`).attr("aria-label", "Sightings over the drive; drag to scrub");
+    tl.x = d3.scaleLinear([0, duration], [0, w]);
+    const times = cols.t.filter((_, i) => shown[cols.k[i]]);
+    const bins = d3.bin().domain([0, duration]).thresholds(Math.min(120, Math.floor(w / 6)))(times);
+    const y = d3.scaleLinear([0, d3.max(bins, b => b.length) || 1], [h - m.b, 2]);
+    svg.append("g").selectAll("rect").data(bins).join("rect")
+      .attr("x", b => tl.x(b.x0) + 1).attr("width", b => Math.max(1, tl.x(b.x1) - tl.x(b.x0) - 2))
+      .attr("y", b => y(b.length)).attr("height", b => y(0) - y(b.length)).attr("rx", 1.5).attr("fill", "#94938a");
+    const d = data.drives[drive], t = d3.scaleTime([new Date(d.start * 1000), new Date((d.start + duration) * 1000)], [0, w]);
+    svg.append("g").attr("class", "axis").attr("transform", `translate(0,${h - m.b})`)
+      .call(d3.axisBottom(t).ticks(Math.max(3, w / 110)).tickSize(3)).select(".domain").remove();
+    tl.head = svg.append("line").attr("y1", 0).attr("y2", h - m.b).attr("stroke", "#f0efec").attr("stroke-width", 2);
+    const seek = e => { cursor = Math.max(0, Math.min(duration, tl.x.invert(d3.pointer(e, svg.node())[0]))); draw(); };
+    svg.call(d3.drag().container(svg.node()).on("start drag", seek));
+    svg.on("click", seek);
+  }
+  function tick(now) {
+    if (!playing) return;
+    const dt = Math.min(.1, (now - last) / 1000); last = now;
+    cursor += dt * +document.getElementById("speed").value;
+    if (cursor >= duration) { cursor = duration; set(false); }
+    draw();
+    if (playing) requestAnimationFrame(tick);
+  }
+  function set(on) {
+    playing = on;
+    document.getElementById("play").textContent = on ? "Pause" : "Play";
+    if (on) { last = performance.now(); requestAnimationFrame(tick); }
+  }
+  function load(i) {
+    drive = i; cols = data.points[i];
+    duration = Math.max(60, d3.max(cols.t) || 60); cursor = 0; painted = 0;
+    s.reset(); s.frame(view(cols)); timeline(); draw();
+    if (!REDUCED) set(true);
+  }
+  function filters() {
+    const box = document.getElementById("kinds");
+    box.innerHTML = KIND_LABEL.map((l, i) => `<label><input type="checkbox" data-kind="${i}" checked><i style="background:${KIND_COLOUR[i]}"></i>${l}</label>`).join("");
+    box.addEventListener("change", e => {
+      shown[+e.target.dataset.kind] = e.target.checked;
+      painted = 0; timeline(); draw();
+    });
+  }
+  return {
+    start() {
+      s = stage("replay-stage", () => { painted = 0; draw(); });
+      const sel = document.getElementById("drive");
+      sel.innerHTML = data.drives.map((d, i) => `<option value="${i}">${driveName(d)} · ${num(d.contacts)}</option>`).join("");
+      sel.onchange = () => load(+sel.value);
+      document.getElementById("play").onclick = () => { if (!playing && cursor >= duration) cursor = 0; set(!playing); };
+      filters();
+      load(0);
+    },
+  };
+})();
+
+(async () => {
+  const msg = document.getElementById("msg");
+  try {
+    data = await (await fetch("/api/atlas", { cache: "no-store" })).json();
+  } catch (e) {
+    msg.textContent = "Couldn't load the drives. Try reloading.";
+    return;
+  }
+  if (!data.drives.length) { msg.textContent = "No drives yet: they appear once WiGLE has processed an upload."; return; }
+  msg.remove();
+  ghost = data.ghost;
+  document.querySelector("#sub").textContent =
+    `${data.drives.length} drives, ${num(d3.sum(data.drives, d => d.contacts))} sightings, streets from ${data.ghost_drives} older drives`;
+  document.getElementById("replay").hidden = false;
+  replay.start();
+})();
+</script>
+</body>
+</html>
