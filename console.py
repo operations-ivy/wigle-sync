@@ -1,42 +1,32 @@
 from __future__ import annotations
 
 import gzip
-import logging
 import os
 import threading
 import time
+from urllib.parse import urlsplit
 
-import structlog
+import brick_observe
 from flask import Flask
 from flask import Response
-from flask import g
 from flask import jsonify
 from flask import render_template
 from flask import request
-from opentelemetry.instrumentation.flask import FlaskInstrumentor
-from prometheus_client import CONTENT_TYPE_LATEST
-from prometheus_client import generate_latest
 
 import console_metrics
 import radar
 import stats
-from observability import init_logging
-from observability import init_tracing
-
-init_logging("wigle-console")
-init_tracing("wigle-console")
-log = structlog.get_logger()
-# werkzeug's access lines are a format of their own (and coloured): console.py
-# logs each request as one structured line instead (_count).
-logging.getLogger("werkzeug").setLevel(logging.WARNING)
-# Probes and scrapes, every few seconds: kept out of the logs.
-QUIET_ROUTES = {"/health", "/ready", "/metrics"}
+brick_observe.init("wigle-console")
+log = brick_observe.get_logger(__name__)
+brick_observe.instrument_requests(
+    {"wigle.net": "wigle", urlsplit(stats.LOKI_URL).hostname: "loki", urlsplit(stats.PROMETHEUS_URL).hostname: "prometheus"}
+)
 
 app = Flask(__name__)
 # Build the first status in the background at start-up, so even the first
 # visitor after a deploy gets a cached answer instead of waiting on Loki.
 threading.Thread(target=stats.collect, daemon=True).start()
-FlaskInstrumentor().instrument_app(app, excluded_urls="health,ready,metrics")
+brick_observe.flask.instrument(app)
 
 # The drive replay (radar.brick.nozdormu.cloud) and the Almanac panel: each finished upload's KML is fetched
 # once, so after the first load a refresh is one cheap transactions call.
@@ -55,35 +45,6 @@ def _refresh_radar() -> None:
 
 threading.Thread(target=_refresh_radar, daemon=True).start()
 console_metrics.register_live(_radar, stats.wigle_cached)
-
-
-@app.before_request
-def _start_timer():
-    g.started = time.monotonic()
-
-
-@app.after_request
-def _count(response):
-    # The matched route, not the raw path, so random paths make no new series.
-    route = request.url_rule.rule if request.url_rule else "other"
-    console_metrics.REQUESTS.labels(route, str(response.status_code)).inc()
-    seconds = time.monotonic() - g.started if "started" in g else None
-    if seconds is not None:
-        console_metrics.REQUEST_SECONDS.labels(route).observe(seconds)
-    (log.debug if route in QUIET_ROUTES else log.info)(
-        "request",
-        method=request.method,
-        path=request.path,
-        route=route,
-        status=response.status_code,
-        duration_ms=round(seconds * 1000, 1) if seconds is not None else None,
-    )
-    return response
-
-
-@app.route("/metrics")
-def prometheus_metrics():
-    return generate_latest(), 200, {"Content-Type": CONTENT_TYPE_LATEST}
 
 
 @app.route("/")

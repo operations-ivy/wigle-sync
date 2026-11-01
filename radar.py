@@ -40,12 +40,12 @@ from datetime import datetime
 from typing import Any
 
 import requests
-import structlog
+import brick_observe
 
 import console_metrics
 from wigle_client import WIGLE_API_URL
 
-log = structlog.get_logger()
+log = brick_observe.get_logger(__name__)
 
 RADAR_UPLOADS = int(os.environ.get("RADAR_UPLOADS", "12"))
 GHOST_UPLOADS = int(os.environ.get("GHOST_UPLOADS", "60"))

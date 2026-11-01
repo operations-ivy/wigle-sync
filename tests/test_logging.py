@@ -6,13 +6,14 @@ from __future__ import annotations
 import importlib.util
 import json
 import logging
+import sys
 from pathlib import Path
 from unittest import mock
 
 import pytest
 import structlog
 
-import observability
+import brick_observe
 
 FIELDS = {"timestamp", "level", "event", "logger", "service"}
 
@@ -33,12 +34,12 @@ def lines(text: str) -> list[dict]:
 
 def test_structlog_and_library_lines_share_one_json_format(capsys):
     with mock.patch.dict("os.environ", {"LOG_FORMAT": "json"}):
-        observability.init_logging("wigle-sync")
-    structlog.get_logger().info("Sync complete", uploaded=2)
+        brick_observe.init("wigle-sync", stream=sys.stdout, tracing_enabled=False)
+    brick_observe.get_logger(__name__).info("Sync complete", uploaded=2)
     logging.getLogger("werkzeug").warning("a library's own line")
     ours, theirs = lines(capsys.readouterr().out)
     assert FIELDS <= ours.keys() and FIELDS <= theirs.keys()
-    assert (ours["service"], ours["logger"], ours["uploaded"]) == ("wigle-sync", "test_logging", 2)
+    assert (ours["service"], ours["logger"], ours["uploaded"]) == ("wigle-sync", __name__, 2)
     assert (theirs["logger"], theirs["level"], theirs["event"]) == ("werkzeug", "warning", "a library's own line")
 
 

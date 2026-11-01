@@ -1,22 +1,18 @@
 [tool.poetry]
 name = "wigle_sync"
-version = "0.1.14"
+version = "0.1.15"
 description = "Pull .kismet/.wiglecsv wardriving logs off a Raspberry Pi and upload them to wigle.net"
 authors = ["Patrick White <whitep@alumni.vcu.edu>"]
 
 [tool.poetry.dependencies]
 python = "^3.11"
 requests = "^2.32.3"
-structlog = "^25.2.0"
 paramiko = "^3.5.1"
 python-dotenv = "^1.1.0"
 prometheus-client = "^0.22.0"
 opentelemetry-api = "^1.44.0"
-opentelemetry-sdk = "^1.44.0"
-opentelemetry-exporter-otlp-proto-grpc = "^1.44.0"
-opentelemetry-instrumentation-requests = "^0.65b0"
+brick-observe = { git = "https://github.com/operations-ivy/brick-observe.git", tag = "v0.1.1", extras = ["flask", "requests"] }
 flask = "^3.1.0"
-opentelemetry-instrumentation-flask = "^0.65b0"
 confluent-kafka = "2.16.0"
 
 [tool.poetry.group.dev.dependencies]

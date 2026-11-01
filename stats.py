@@ -11,7 +11,7 @@ from datetime import timezone
 from typing import Any
 
 import requests
-import structlog
+import brick_observe
 
 import console_metrics
 import detect
@@ -20,7 +20,7 @@ from sync import pi_is_online
 from sync import REPORT_EVENT
 from wigle_client import WIGLE_API_URL
 
-log = structlog.get_logger()
+log = brick_observe.get_logger(__name__)
 
 PROMETHEUS_URL = os.environ.get(
     "PROMETHEUS_URL", "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090"

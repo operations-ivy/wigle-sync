@@ -973,7 +973,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "sum by (route, code) (rate(wigle_console_http_requests_total{route!~\"/metrics|/health|/ready\"}[5m]))",
+              "expr": "sum by (route, code) (rate(http_server_requests_total{namespace=\"wigle\",route!~\"/metrics|/health|/ready\"}[5m]))",
               "legendFormat": "{{route}} {{code}}"
             }
           ],
@@ -1033,7 +1033,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "histogram_quantile(0.95, sum by (route, le) (rate(wigle_console_http_request_duration_seconds_bucket{route!~\"/metrics|/health|/ready\"}[5m])))",
+              "expr": "histogram_quantile(0.95, sum by (route, le) (rate(http_server_request_duration_seconds_bucket{namespace=\"wigle\",route!~\"/metrics|/health|/ready\"}[5m])))",
               "legendFormat": "{{route}}"
             }
           ],
