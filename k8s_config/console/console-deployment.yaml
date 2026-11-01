@@ -23,6 +23,12 @@ spec:
         labelSelector:
           matchLabels:
             app: wigle-console
+      # Every Prometheus and Loki poll looks its name up afresh. With the default
+      # ndots:5 each one tried four wrong suffixes first, one of them the router's
+      # search domain, so cluster names left the house.
+      dnsConfig:
+        options:
+          - {name: ndots, value: "2"}
       containers:
       - name: wigle-console
         image: whitepatrick/wigle-console
