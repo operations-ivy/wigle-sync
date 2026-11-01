@@ -91,7 +91,7 @@ files = [
 
 [[package]]
 name = "brick-observe"
-version = "0.1.0"
+version = "0.1.1"
 description = "Logs, metrics and traces the same way in every brick homelab service: one init() call"
 optional = false
 python-versions = "^3.11"
@@ -120,8 +120,8 @@ tracing = ["opentelemetry-api (>=1.30,<2.0)", "opentelemetry-exporter-otlp-proto
 [package.source]
 type = "git"
 url = "https://github.com/operations-ivy/brick-observe.git"
-reference = "v0.1.0"
-resolved_reference = "24262aa49853238751990ee6cf04458decd99302"
+reference = "v0.1.1"
+resolved_reference = "60cd5bd150e40cdc143dc232b1b175b77a61a7ff"
 
 [[package]]
 name = "certifi"
@@ -1668,4 +1668,4 @@ dev = ["pytest", "setuptools"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "98d1cae5b8ebc85009f18bb0bc4922dd0ab01472dcdfaeb9a01566069333ee13"
+content-hash = "55566bb2e04978b896bcf8a6f8af4be3319e2fdea739abb96098ba4c2168702a"
