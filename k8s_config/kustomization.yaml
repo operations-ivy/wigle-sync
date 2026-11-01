@@ -23,6 +23,6 @@ resources:
 
 images:
   - name: whitepatrick/wigle-sync
-    newTag: 0.1.12
+    newTag: 0.1.13
   - name: whitepatrick/wigle-console
-    newTag: 0.1.19
+    newTag: 0.1.20
