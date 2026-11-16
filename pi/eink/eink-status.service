@@ -1,0 +1,24 @@
+[Unit]
+Description=The wardriver's status on its e-ink display (eink-status.py)
+After=gpsd.service pisugar-watch.service
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/lib/wigle-eink/eink-status.py
+Environment=LOG_FORMAT=json
+Environment=PYTHONPATH=/usr/local/lib/wigle-eink
+LoadCredential=kismet-httpd:/home/zaphod/.kismet/kismet_httpd.conf
+# The last screen ("OFF") takes a full refresh and the panel's 2 s sleep.
+TimeoutStopSec=30
+# Root for /dev/spidev0.0 and /dev/gpiochip0; everything else read-only.
+# gpiozero's lgpio backend makes its notify pipes in the working directory.
+RuntimeDirectory=wigle-eink
+WorkingDirectory=/run/wigle-eink
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
