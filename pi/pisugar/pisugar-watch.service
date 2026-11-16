@@ -1,0 +1,17 @@
+[Unit]
+Description=PiSugar battery: metrics, clean shutdown when low, RTC (pisugar-watch.py)
+After=pisugar-server.service
+Wants=pisugar-server.service
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/lib/wigle-pisugar/pisugar-watch.py
+Environment=LOG_FORMAT=json
+# pisugar-server's socket lives in the real /tmp.
+ReadWritePaths=/run/node-exporter-textfile /run/wigle-pi
+ProtectSystem=strict
+ProtectHome=yes
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
