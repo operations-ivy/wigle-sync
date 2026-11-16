@@ -1,0 +1,15 @@
+[Unit]
+Description=Set the clock from the PiSugar's RTC when it's ahead (pisugar-watch.py --rtc-load)
+After=pisugar-server.service fake-hwclock-load.service
+Wants=pisugar-server.service
+Before=chrony.service wait-for-clock.service kismet.service vmagent.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/wigle-pisugar/pisugar-watch.py --rtc-load
+Environment=LOG_FORMAT=json
+RemainAfterExit=yes
+TimeoutStartSec=30
+
+[Install]
+WantedBy=multi-user.target

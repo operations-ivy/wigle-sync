@@ -181,6 +181,58 @@ scp pi/kismet-size-watch.* pi/setup-kismet-size-watch.sh zaphod@brick69:/tmp/
 ssh zaphod@brick69 'sudo bash /tmp/setup-kismet-size-watch.sh'
 ```
 
+### A Pi Zero 2 W handheld
+
+The same host can be built on a Raspberry Pi Zero 2 W with a PiSugar 2
+battery and a Waveshare 2.13" e-ink display (pwnagotchi hardware), for #65.
+`bootstrap.sh` picks the board profile from `/proc/device-tree/model`
+(`pi/zero2w/pi-profile`; `PI_PROFILE` in `/etc/default/kismet-pi` overrides
+it). On brick69's Pi 3B+ the profile is `default` and nothing below runs.
+
+- **`zero2w` profile** (`pi/zero2w/setup-zero2w.sh`), for 512 MB: swap in
+  zram only, never a swap file on the SD card (Raspberry Pi OS's `rpi-swap`
+  set to zram, or `systemd-zram-generator`); headless (no KMS driver,
+  `gpu_mem=16`); Kismet's device tracker capped
+  (`pi/zero2w/kismet_lowmem.conf`: devices unheard for 10 minutes are
+  dropped from memory, not from the logs; `kismet_site.conf` includes it
+  only when present); a soft heap limit for vmagent and node-exporter, and
+  the OOM killer told to take them before Kismet. The RGB status LEDs
+  aren't built: the display's reset pin is LED3's GPIO17.
+- **One USB port.** The Zero 2 W's only data port is its micro-USB OTG port,
+  so the Wi-Fi, Bluetooth and GPS dongles go through a hub, and the port must
+  be a USB host (a pwnagotchi image sets it up as a USB gadget for its
+  tether; a fresh Raspberry Pi OS doesn't). With the hub there, there's no
+  USB tether: reach the Pi over the home Wi-Fi as usual.
+- **`EINK=1`**: `eink-status.service` (`pi/eink/`) shows home or away, the
+  GPS fix, Kismet's sources, devices heard in the last minute, the battery
+  and the time. It asks the same places pi-metrics does (Kismet's REST API,
+  gpsd, `on-home-wifi`) and redraws only when the text changes: a partial
+  refresh at most every 30 s, a full one after 30 partial ones or 30
+  minutes, so the panel neither wears nor ghosts. Its last screen, left on
+  the panel while the Pi is off, says why it stopped. Waveshare's Python
+  driver is fetched by `setup-eink.sh` at a pinned commit, checked by
+  SHA-256.
+- **`PISUGAR=1`** (`pi/pisugar/`): PiSugar's own `pisugar-server` (pinned
+  release, checked by SHA-256) owns the board's I2C chips and listens on its
+  Unix socket only (its packaged defaults also open a web UI and a TCP API
+  on every interface). `pisugar-watch.service` asks it every 30 s:
+  `pi_battery_percent`, `pi_battery_volts`, `pi_battery_charging` and
+  `pi_pisugar_up` go to node-exporter's textfile directory (and so through
+  vmagent), and after 4 polls in a row at or under 10 % (or 3.5 V) with
+  nothing charging it, it powers the Pi off cleanly. pisugar-server's own
+  safe shutdown is set at 5 % as a backstop, and `pisugar-poweroff` cuts the
+  battery's output at the end of a shutdown, so a halted Pi and its dongles
+  don't run it flat. The PiSugar's RTC is the clock's fallback:
+  `pisugar-rtc-load.service` sets the clock from it at boot when it's ahead
+  of fake-hwclock's saved time (before chrony and Kismet), and once chrony
+  has the real time it's written back hourly.
+
+Their settings (panel model `epd2in13_V2`/`V3`/`V4`, refresh cadence,
+shutdown thresholds, the PiSugar 2's LED variant) are in
+`/etc/wigle-pi/handheld.yaml`, installed from `pi/handheld.example.yaml`
+when missing. The software is built and unit tested; the bench prototype
+(power under load, memory with all three Kismet sources) is still to come.
+
 ## Running
 
 ```bash

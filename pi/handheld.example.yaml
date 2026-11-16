@@ -1,0 +1,35 @@
+# The handheld's e-ink display and PiSugar battery (README, "A Pi Zero 2 W
+# handheld"). setup-eink.sh and setup-pisugar.sh install this as
+# /etc/wigle-pi/handheld.yaml when it's missing and never overwrite it, so
+# edit it there. Every key is optional; these are the defaults.
+
+display:
+  # The Waveshare 2.13" panel's driver: epd2in13_V2, epd2in13_V3 or
+  # epd2in13_V4 (the version is printed on the panel's ribbon or PCB).
+  model: epd2in13_V4
+  # 0, or 180 for a case that holds the panel upside down.
+  rotate: 0
+  # Seconds between looks at Kismet, gpsd and the battery.
+  poll: 10
+  # The screen is redrawn only when its text changes: by partial refresh at
+  # most every min_interval seconds, and by a full refresh (clears ghosting)
+  # after full_every partial ones or full_interval seconds.
+  min_interval: 30
+  full_every: 30
+  full_interval: 1800
+
+battery:
+  # pisugar-server's name for the board: "PiSugar 2 (4-LEDs)" or
+  # "PiSugar 2 (2-LEDs)" (count the LEDs by its switch).
+  model: PiSugar 2 (4-LEDs)
+  poll: 30
+  # Shut down cleanly once `readings` polls in a row (2 minutes) find the
+  # battery at or under shutdown_percent, or at or under shutdown_volts,
+  # with nothing charging it.
+  shutdown_percent: 10
+  shutdown_volts: 3.5
+  readings: 4
+  # pisugar-server's own shutdown, in case pisugar-watch isn't running.
+  backstop_percent: 5
+  # Seconds between writes of the real time to the PiSugar's RTC.
+  rtc_write_every: 3600
