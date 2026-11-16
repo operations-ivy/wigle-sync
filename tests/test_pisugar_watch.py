@@ -4,34 +4,34 @@ name)."""
 
 from __future__ import annotations
 
-import importlib.util
-import os
 import socket
-import sys
 import threading
 from datetime import datetime
 from datetime import timedelta
-from datetime import timezone
-from pathlib import Path
+from datetime import UTC
 
 import pytest
 
-SPEC = importlib.util.spec_from_file_location(
-    "pisugar_watch", Path(__file__).resolve().parent.parent / "pi" / "pisugar" / "pisugar-watch.py"
+from tests.conftest import load_script
+from tests.conftest import PI
+
+pw = load_script("pisugar_watch", PI / "pisugar" / "pisugar-watch.py")
+
+T0 = datetime(2026, 11, 16, 12, 0, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    "line, parsed",
+    [
+        ("battery: 85.3\n", ("battery", "85.3")),
+        ("rtc_time: 2026-11-16T12:00:00.000+00:00", ("rtc_time", "2026-11-16T12:00:00.000+00:00")),
+        ("Invalid request", None),
+        ("error: no such thing: x", ("error", "no such thing: x")),
+        ("", None),
+    ],
 )
-pw = importlib.util.module_from_spec(SPEC)
-sys.modules["pisugar_watch"] = pw  # dataclasses look their module up
-SPEC.loader.exec_module(pw)
-
-T0 = datetime(2026, 11, 16, 12, 0, tzinfo=timezone.utc)
-
-
-def test_parse_reply():
-    assert pw.parse_reply("battery: 85.3\n") == ("battery", "85.3")
-    assert pw.parse_reply("rtc_time: 2026-11-16T12:00:00.000+00:00") == ("rtc_time", "2026-11-16T12:00:00.000+00:00")
-    assert pw.parse_reply("Invalid request") is None
-    assert pw.parse_reply("error: no such thing: x") == ("error", "no such thing: x")
-    assert pw.parse_reply("") is None
+def test_parse_reply(line, parsed):
+    assert pw.parse_reply(line) == parsed
 
 
 def test_reading_from_pisugar_2_answers():
@@ -111,28 +111,44 @@ def test_rtc_ahead_sets_the_clock_at_boot():
 
 
 def test_rtc_that_lost_power_is_ignored():
-    assert pw.rtc_action(T0, datetime(2000, 1, 1, tzinfo=timezone.utc), T0, False, None, 3600) is None
+    assert pw.rtc_action(T0, datetime(2000, 1, 1, tzinfo=UTC), T0, False, None, 3600) is None
 
 
-def test_rtc_behind_the_clock_is_ignored_until_synced():
-    assert pw.rtc_action(T0, T0 - timedelta(hours=1), None, False, None, 3600) is None
-    assert pw.rtc_action(T0, T0 + timedelta(seconds=1), None, False, None, 3600) is None
-    assert pw.rtc_action(T0, None, None, False, None, 3600) is None
+@pytest.mark.parametrize(
+    "rtc",
+    [T0 - timedelta(hours=1), T0 + timedelta(seconds=1), None],
+    ids=["behind", "within tolerance", "unreadable"],
+)
+def test_rtc_left_alone_until_synced(rtc):
+    assert pw.rtc_action(T0, rtc, None, False, None, 3600) is None
 
 
-def test_synced_clock_writes_the_rtc_when_off_or_due():
-    assert pw.rtc_action(T0, T0 + timedelta(seconds=30), None, True, 10, 3600) == "pi2rtc"
-    assert pw.rtc_action(T0, None, None, True, 10, 3600) == "pi2rtc"
-    assert pw.rtc_action(T0, T0, None, True, None, 3600) == "pi2rtc"
-    assert pw.rtc_action(T0, T0, None, True, 3600, 3600) == "pi2rtc"
-    assert pw.rtc_action(T0, T0 + timedelta(seconds=1), None, True, 60, 3600) is None
+@pytest.mark.parametrize(
+    "rtc, since_write, action",
+    [
+        (T0 + timedelta(seconds=30), 10, "pi2rtc"),
+        (None, 10, "pi2rtc"),
+        (T0, None, "pi2rtc"),
+        (T0, 3600, "pi2rtc"),
+        (T0 + timedelta(seconds=1), 60, None),
+    ],
+    ids=["off", "unreadable", "never written", "due", "close and recent"],
+)
+def test_synced_clock_writes_the_rtc_when_off_or_due(rtc, since_write, action):
+    assert pw.rtc_action(T0, rtc, None, True, since_write, 3600) == action
 
 
-def test_parse_rtc():
-    assert pw.parse_rtc("2026-11-16T12:00:00.000+00:00") == T0
-    assert pw.parse_rtc("2026-11-16T12:00:00") is None  # no zone: not trusted
-    assert pw.parse_rtc("I2C error") is None
-    assert pw.parse_rtc(None) is None
+@pytest.mark.parametrize(
+    "value, parsed",
+    [
+        ("2026-11-16T12:00:00.000+00:00", T0),
+        ("2026-11-16T12:00:00", None),  # no zone: not trusted
+        ("I2C error", None),
+        (None, None),
+    ],
+)
+def test_parse_rtc(value, parsed):
+    assert pw.parse_rtc(value) == parsed
 
 
 def test_fake_hwclock_floor(tmp_path):
@@ -140,13 +156,6 @@ def test_fake_hwclock_floor(tmp_path):
     saved.write_text("2026-11-16 12:00:00\n")
     assert pw.fake_hwclock_floor(saved) == T0
     assert pw.fake_hwclock_floor(tmp_path / "missing") is None
-
-
-def test_chrony_synced():
-    synced = "CB007105,203.0.113.5,3,1763294400.0,0.0001,0.0,0.0,1.0,0.0,0.0,0.01,0.001,64.0,Normal\n"
-    assert pw.parse_chrony_synced(synced)
-    assert not pw.parse_chrony_synced("00000000,,0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,Not synchronised\n")
-    assert not pw.parse_chrony_synced("")
 
 
 def test_config_defaults_and_overrides(tmp_path):
@@ -186,8 +195,6 @@ def fake_server(tmp_path):
     threading.Thread(target=serve, daemon=True).start()
     yield path
     srv.close()
-    if os.path.exists(path):
-        os.unlink(path)
 
 
 def test_reading_over_the_socket(fake_server):

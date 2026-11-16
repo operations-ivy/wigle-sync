@@ -85,7 +85,7 @@ printf '%s\n' "OPTS=\"--model '$model' --countdown $POWEROFF_COUNTDOWN\"" > /etc
 install -m 644 "$SRC/wigle-pi-state.conf" /etc/tmpfiles.d/wigle-pi-state.conf
 systemd-tmpfiles --create /etc/tmpfiles.d/wigle-pi-state.conf
 install -d -m 755 /usr/local/lib/wigle-pisugar
-install -m 644 "$SRC/pisugar-watch.py" /usr/local/lib/wigle-pisugar/
+install -m 644 "$SRC/pisugar-watch.py" "$SRC/../handheld_common.py" /usr/local/lib/wigle-pisugar/
 install -m 644 "$SRC/pisugar-watch.service" "$SRC/pisugar-rtc-load.service" /etc/systemd/system/
 install -D -m 644 "$SRC/pisugar-poweroff-order.conf" /etc/systemd/system/pisugar-poweroff.service.d/order.conf
 systemctl daemon-reload

@@ -54,7 +54,7 @@ for f in "${!SHA256[@]}"; do
 done
 : > "$LIB/waveshare_epd/__init__.py"
 
-install -m 644 "$SRC/eink-status.py" "$LIB/"
+install -m 644 "$SRC/eink-status.py" "$SRC/../handheld_common.py" "$LIB/"
 install -m 644 "$SRC/eink-status.service" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable eink-status.service

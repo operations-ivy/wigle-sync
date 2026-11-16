@@ -3,40 +3,37 @@ panel (loaded by path: the script has a dash in its name)."""
 
 from __future__ import annotations
 
-import importlib.util
+import dataclasses
 import json
-import sys
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 
-SPEC = importlib.util.spec_from_file_location(
-    "eink_status", Path(__file__).resolve().parent.parent / "pi" / "eink" / "eink-status.py"
-)
-eink = importlib.util.module_from_spec(SPEC)
-sys.modules["eink_status"] = eink  # dataclasses look their module up
-SPEC.loader.exec_module(eink)
+from tests.conftest import load_script
+from tests.conftest import PI
+
+eink = load_script("eink_status", PI / "eink" / "eink-status.py")
 
 NOON = datetime(2026, 11, 16, 12, 34)
 
 
+DRIVING = eink.Status(
+    home=False,
+    gps_mode=3,
+    satellites=9,
+    kismet_up=True,
+    sources={"usb_bt": "ok", "wlan_mon0": "ok"},
+    recent={"wifi": 247, "bluetooth": 31},
+    battery_percent=78.4,
+    charging=False,
+    clock_synced=True,
+    now=NOON,
+)
+
+
 def driving(**changes):
-    status = eink.Status(
-        home=False,
-        gps_mode=3,
-        satellites=9,
-        kismet_up=True,
-        sources={"usb_bt": "ok", "wlan_mon0": "ok"},
-        recent={"wifi": 247, "bluetooth": 31},
-        battery_percent=78.4,
-        charging=False,
-        clock_synced=True,
-        now=NOON,
-    )
-    for key, value in changes.items():
-        setattr(status, key, value)
-    return status
+    return dataclasses.replace(DRIVING, **changes)
 
 
 def test_on_the_road():
@@ -65,6 +62,13 @@ def test_a_source_in_error():
     lines = eink.screen_lines(driving(sources={"usb_bt": "off", "wlan_mon0": "ERR"}))
     assert lines[1] == "BT off   Wi-Fi ERR"
     assert eink.screen_lines(driving(sources={}))[1] == "Kismet: no sources"
+
+
+@pytest.mark.parametrize(
+    "mode, sats, text", [(3, 9, "GPS 3D 9 sat"), (2, 4, "GPS 2D 4 sat"), (1, 0, "GPS no fix"), (0, 0, "GPS ?")]
+)
+def test_gps_text(mode, sats, text):
+    assert eink.gps_text(mode, sats) == text
 
 
 def test_source_state_and_label():
@@ -107,40 +111,44 @@ def test_battery_state_file(tmp_path):
     assert eink.battery(state, 1000.0) == (None, None)
 
 
-class TestRefreshPolicy:
-    def policy(self):
-        return eink.RefreshPolicy(min_interval=30, full_every=3, full_interval=1800)
+@pytest.fixture
+def policy():
+    return eink.RefreshPolicy(min_interval=30, full_every=3, full_interval=1800)
 
-    def test_first_draw_is_full(self):
-        assert self.policy().decide(["a"], 0) == "full"
 
-    def test_unchanged_is_left_alone(self):
-        p = self.policy()
-        p.done(["a"], "full", 0)
-        assert p.decide(["a"], 100) is None
+@pytest.fixture
+def shown(policy):
+    """A policy that has drawn ["a"] with a full refresh at time 0."""
+    policy.done(["a"], "full", 0)
+    return policy
 
-    def test_changes_wait_for_the_min_interval(self):
-        p = self.policy()
-        p.done(["a"], "full", 0)
-        assert p.decide(["b"], 10) is None
-        assert p.decide(["b"], 30) == "partial"
 
-    def test_full_after_full_every_partials(self):
-        p = self.policy()
-        p.done(["a"], "full", 0)
-        t = 0
-        for i in range(3):
-            t += 30
-            assert p.decide([str(i)], t) == "partial"
-            p.done([str(i)], "partial", t)
-        assert p.decide(["x"], t + 30) == "full"
-        p.done(["x"], "full", t + 30)
-        assert p.partials == 0
+def test_first_draw_is_full(policy):
+    assert policy.decide(["a"], 0) == "full"
 
-    def test_full_after_full_interval(self):
-        p = self.policy()
-        p.done(["a"], "full", 0)
-        assert p.decide(["b"], 1800) == "full"
+
+def test_unchanged_is_left_alone(shown):
+    assert shown.decide(["a"], 100) is None
+
+
+def test_changes_wait_for_the_min_interval(shown):
+    assert shown.decide(["b"], 10) is None
+    assert shown.decide(["b"], 30) == "partial"
+
+
+def test_full_after_full_every_partials(shown):
+    t = 0
+    for i in range(3):
+        t += 30
+        assert shown.decide([str(i)], t) == "partial"
+        shown.done([str(i)], "partial", t)
+    assert shown.decide(["x"], t + 30) == "full"
+    shown.done(["x"], "full", t + 30)
+    assert shown.partials == 0
+
+
+def test_full_after_full_interval(shown):
+    assert shown.decide(["b"], 1800) == "full"
 
 
 def test_config(tmp_path):
@@ -156,7 +164,7 @@ def test_config(tmp_path):
 def test_config_rejects_an_unknown_panel(tmp_path):
     conf = tmp_path / "handheld.yaml"
     conf.write_text("display:\n  model: epd7in5\n")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="epd7in5"):
         eink.load_config(conf)
 
 

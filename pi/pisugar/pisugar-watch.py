@@ -29,18 +29,20 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import signal
 import socket
 import subprocess
 import sys
-import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from datetime import timezone
+from datetime import UTC
 from pathlib import Path
 
-import structlog
+from handheld_common import chrony_synced
+from handheld_common import init_logging
+from handheld_common import stop_on_sigterm
+from handheld_common import write_atomic
 
 SOCKET = os.environ.get("PISUGAR_SOCKET", "/tmp/pisugar-server.sock")
 CONFIG = Path(os.environ.get("HANDHELD_CONFIG", "/etc/wigle-pi/handheld.yaml"))
@@ -110,7 +112,12 @@ def reading_from(replies: dict[str, str]) -> Reading:
     charging as battery_charging; newer models as battery_power_plugged.
     Either one true means it's on external power."""
     flags = [parse_bool(replies.get(k)) for k in ("battery_charging", "battery_power_plugged")]
-    charging = True if True in flags else False if False in flags else None
+    if True in flags:
+        charging = True
+    elif False in flags:
+        charging = False
+    else:
+        charging = None
     return Reading(
         percent=parse_float(replies.get("battery"), 0.0, 100.0),
         volts=parse_float(replies.get("battery_v"), 2.5, 4.5),
@@ -199,27 +206,9 @@ def parse_rtc(value: str | None) -> datetime | None:
 def fake_hwclock_floor(path: Path = FAKE_HWCLOCK) -> datetime | None:
     """fake-hwclock's saved time ("2026-11-16 21:04:05", UTC)."""
     try:
-        return datetime.strptime(path.read_text().strip(), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        return datetime.strptime(path.read_text().strip(), "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
     except (OSError, ValueError):
         return None
-
-
-def parse_chrony_synced(csv_line: str) -> bool:
-    """`chronyc -c tracking`: the reference ID is the first field, the leap
-    status the last. Unsynchronised, chrony reports reference 0 or
-    "Not synchronised"."""
-    fields = csv_line.strip().split(",")
-    if len(fields) < 2:
-        return False
-    return fields[0] not in ("", "00000000", "7F7F0101") and fields[-1] != "Not synchronised"
-
-
-def chrony_synced() -> bool:
-    try:
-        r = subprocess.run(["chronyc", "-c", "tracking"], capture_output=True, text=True, timeout=5)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return r.returncode == 0 and parse_chrony_synced(r.stdout)
 
 
 class PiSugar:
@@ -235,15 +224,11 @@ class PiSugar:
                 s.settimeout(self.timeout)
                 s.connect(self.path)
                 s.sendall(command.encode() + b"\n")
-                data = b""
-                while not data.endswith(b"\n"):
-                    chunk = s.recv(256)
-                    if not chunk:
-                        break
-                    data += chunk
-        except OSError:
+                with s.makefile("rb") as f:
+                    line = f.readline()
+        except OSError:  # no server, or it didn't answer within the timeout
             return None
-        parsed = parse_reply(data.decode(errors="replace").splitlines()[0] if data else "")
+        parsed = parse_reply(line.decode(errors="replace"))
         return parsed[1] if parsed else None
 
     def reading(self) -> tuple[Reading, bool]:
@@ -256,31 +241,6 @@ class PiSugar:
         return reading_from(replies), bool(replies)
 
 
-def write_atomic(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}-")
-    with os.fdopen(fd, "w") as f:
-        f.write(text)
-    os.chmod(tmp, 0o644)
-    os.replace(tmp, path)
-
-
-def init_logging() -> structlog.typing.FilteringBoundLogger:
-    """JSON lines when the unit sets LOG_FORMAT=json, as status-leds does."""
-    json_out = os.environ.get("LOG_FORMAT") == "json"
-    structlog.configure(
-        processors=[
-            structlog.processors.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso", utc=True),
-            lambda _, __, event_dict: {**event_dict, "logger": "pisugar-watch", "service": "pisugar-watch"},
-            structlog.processors.JSONRenderer() if json_out else structlog.dev.ConsoleRenderer(colors=False),
-        ],
-        logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=False,
-    )
-    return structlog.get_logger()
-
-
 def rtc_load(pisugar: PiSugar, log) -> None:
     """Once at boot: the clock from the RTC if the RTC is ahead (rtc_action)."""
     rtc = None
@@ -289,7 +249,7 @@ def rtc_load(pisugar: PiSugar, log) -> None:
         if rtc is not None:
             break
         time.sleep(1)
-    clock = datetime.now(timezone.utc)
+    clock = datetime.now(UTC)
     action = rtc_action(clock, rtc, fake_hwclock_floor(), chrony_synced(), None, DEFAULTS["rtc_write_every"])
     if action == "rtc2pi":
         pisugar.ask("rtc_rtc2pi")
@@ -298,21 +258,46 @@ def rtc_load(pisugar: PiSugar, log) -> None:
         log.info("clock left alone", rtc=rtc.isoformat() if rtc else None, clock=clock.isoformat())
 
 
-def watch(pisugar: PiSugar, config: dict, log) -> None:
+def publish(reading: Reading, up: bool, shutdown_percent: float) -> None:
+    """The reading as metrics for node-exporter and as state for the display."""
+    write_atomic(TEXTFILE, render_metrics(reading, shutdown_percent, up))
+    state = {"percent": reading.percent, "volts": reading.volts, "charging": reading.charging, "at": time.time()}
+    write_atomic(STATE_DIR / "battery.json", json.dumps(state))
+
+
+def sync_rtc(pisugar: PiSugar, last_write: float | None, every: float) -> float | None:
+    """Write chrony's time to the RTC when it's due (rtc_action); returns when
+    it was last written (time.monotonic())."""
+    since = None if last_write is None else time.monotonic() - last_write
+    rtc = parse_rtc(pisugar.ask("get rtc_time"))
+    if rtc_action(datetime.now(UTC), rtc, None, True, since, every) == "pi2rtc":
+        pisugar.ask("rtc_pi2rtc")
+        return time.monotonic()
+    return last_write
+
+
+def power_off(reading: Reading, log) -> None:
+    """Say why (the display's last screen shows it), then power off."""
+    log.warning("battery low: shutting down", percent=reading.percent, volts=reading.volts)
+    reason = f"battery {reading.percent:.0f}%" if reading.ok else "battery low"
+    write_atomic(STATE_DIR / "shutdown-reason", reason + "\n")
+    try:
+        result = subprocess.run(["systemctl", "poweroff"], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as e:
+        log.warning("poweroff failed", error=str(e))
+        return
+    if result.returncode != 0:
+        log.warning("poweroff failed", returncode=result.returncode, stderr=result.stderr.strip())
+
+
+def watch(pisugar: PiSugar, config: dict, log, stop: threading.Event) -> None:
     guard = ShutdownGuard(config["shutdown_percent"], config["shutdown_volts"], config["readings"])
     # pisugar-server's own shutdown, under ours, in case this service is down.
     pisugar.ask(f"set_safe_shutdown_level {config['backstop_percent']}")
     pisugar.ask("set_safe_shutdown_delay 60")
-    stop = False
-
-    def on_term(*_):
-        nonlocal stop
-        stop = True
-
-    signal.signal(signal.SIGTERM, on_term)
     last_write: float | None = None
     was_up, was_charging = None, None
-    while not stop:
+    while not stop.is_set():
         reading, up = pisugar.reading()
         if up != was_up:
             log.info("pisugar-server answering" if up else "pisugar-server not answering")
@@ -320,41 +305,25 @@ def watch(pisugar: PiSugar, config: dict, log) -> None:
         if reading.charging is not None and reading.charging != was_charging:
             log.info("power", charging=reading.charging, percent=reading.percent, volts=reading.volts)
             was_charging = reading.charging
-        write_atomic(TEXTFILE, render_metrics(reading, config["shutdown_percent"], up))
-        write_atomic(
-            STATE_DIR / "battery.json",
-            json.dumps(
-                {"percent": reading.percent, "volts": reading.volts, "charging": reading.charging, "at": time.time()}
-            ),
-        )
+        publish(reading, up, config["shutdown_percent"])
         if guard.update(reading):
-            log.warning("battery low: shutting down", percent=reading.percent, volts=reading.volts, readings=guard.low)
-            write_atomic(
-                STATE_DIR / "shutdown-reason", f"battery {reading.percent:.0f}%\n" if reading.ok else "battery low\n"
-            )
-            subprocess.run(["systemctl", "poweroff"], check=False)
+            power_off(reading, log)
             return
         if up and chrony_synced():
-            since = None if last_write is None else time.monotonic() - last_write
-            rtc = parse_rtc(pisugar.ask("get rtc_time"))
-            if rtc_action(datetime.now(timezone.utc), rtc, None, True, since, config["rtc_write_every"]) == "pi2rtc":
-                pisugar.ask("rtc_pi2rtc")
-                last_write = time.monotonic()
-        end = time.monotonic() + config["poll"]
-        while not stop and time.monotonic() < end:
-            time.sleep(1)
+            last_write = sync_rtc(pisugar, last_write, config["rtc_write_every"])
+        stop.wait(config["poll"])
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--rtc-load", action="store_true", help="set the clock from the RTC if it's ahead, and exit")
     args = parser.parse_args(argv)
-    log = init_logging()
+    log = init_logging("pisugar-watch")
     pisugar = PiSugar()
     if args.rtc_load:
         rtc_load(pisugar, log)
     else:
-        watch(pisugar, load_config(), log)
+        watch(pisugar, load_config(), log, stop_on_sigterm())
 
 
 if __name__ == "__main__":

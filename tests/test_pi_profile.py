@@ -30,13 +30,23 @@ def profile(tmp_path, model, pi_profile=None):
     ],
 )
 def test_detected(tmp_path, model, expected):
-    assert profile(tmp_path, model).stdout == f"{expected}\n"
+    result = profile(tmp_path, model)
+    assert result.returncode == 0
+    assert result.stdout == f"{expected}\n"
 
 
-def test_setting_overrides_detection(tmp_path):
-    assert profile(tmp_path, "Raspberry Pi 3 Model B Plus Rev 1.3", "zero2w").stdout == "zero2w\n"
-    assert profile(tmp_path, "Raspberry Pi Zero 2 W Rev 1.0", "default").stdout == "default\n"
-    assert profile(tmp_path, "Raspberry Pi Zero 2 W Rev 1.0", "auto").stdout == "zero2w\n"
+@pytest.mark.parametrize(
+    "model, setting, expected",
+    [
+        ("Raspberry Pi 3 Model B Plus Rev 1.3", "zero2w", "zero2w"),
+        ("Raspberry Pi Zero 2 W Rev 1.0", "default", "default"),
+        ("Raspberry Pi Zero 2 W Rev 1.0", "auto", "zero2w"),
+    ],
+)
+def test_setting_overrides_detection(tmp_path, model, setting, expected):
+    result = profile(tmp_path, model, setting)
+    assert result.returncode == 0
+    assert result.stdout == f"{expected}\n"
 
 
 def test_unknown_setting_fails(tmp_path):

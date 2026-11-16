@@ -35,7 +35,6 @@ import base64
 import importlib
 import json
 import os
-import signal
 import socket
 import subprocess
 import sys
@@ -46,8 +45,13 @@ from dataclasses import dataclass
 from dataclasses import field
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
-import structlog
+from handheld_common import chrony_synced
+from handheld_common import init_logging
+from handheld_common import stop_on_sigterm
+
+Refresh = Literal["full", "partial"]
 
 CONFIG = Path(os.environ.get("HANDHELD_CONFIG", "/etc/wigle-pi/handheld.yaml"))
 STATE_DIR = Path(os.environ.get("WIGLE_PI_STATE", "/run/wigle-pi"))
@@ -107,7 +111,7 @@ def rounded(n: int) -> int:
     if n < 20:
         return n
     step = 5 if n < 100 else 10
-    return int(round(n / step) * step)
+    return round(n / step) * step
 
 
 def source_state(src: dict) -> str:
@@ -122,12 +126,20 @@ def source_label(name: str) -> str:
     return "BT" if "bt" in name.lower() or name.startswith("hci") else "Wi-Fi"
 
 
+def gps_text(mode: int, satellites: int) -> str:
+    """gpsd's fix as shown: "GPS 3D 9 sat", "GPS no fix", or "GPS ?"."""
+    if mode in (2, 3):
+        return f"GPS {mode}D {satellites} sat"
+    if mode == 1:
+        return "GPS no fix"
+    return "GPS ?"
+
+
 def screen_lines(s: Status) -> list[str]:
     """The screen's text, top to bottom: the first line is drawn bold, the
     last small. Pure, so the layout is tested without a panel."""
     where = {True: "HOME", False: "AWAY", None: "?"}[s.home]
-    fix = {2: "2D", 3: "3D"}.get(s.gps_mode)
-    gps = f"GPS {fix} {s.satellites} sat" if fix else "GPS no fix" if s.gps_mode == 1 else "GPS ?"
+    gps = gps_text(s.gps_mode, s.satellites)
     if not s.kismet_up:
         sources = "Kismet stopped"
     elif not s.sources:
@@ -158,16 +170,19 @@ def off_lines(reason: str | None, shutting_down: bool, now: datetime, clock_sync
     return ["DISPLAY STOPPED", "the Pi may still be on", at, "", "wigle-sync"]
 
 
+@dataclass
 class RefreshPolicy:
     """When to redraw: None (leave it), "partial" or "full"."""
 
-    def __init__(self, min_interval: float, full_every: int, full_interval: float):
-        self.min_interval, self.full_every, self.full_interval = min_interval, full_every, full_interval
-        self.shown: list[str] | None = None
-        self.last = self.last_full = float("-inf")
-        self.partials = 0
+    min_interval: float
+    full_every: int
+    full_interval: float
+    shown: list[str] | None = None
+    last: float = float("-inf")
+    last_full: float = float("-inf")
+    partials: int = 0
 
-    def decide(self, lines: list[str], now: float) -> str | None:
+    def decide(self, lines: list[str], now: float) -> Refresh | None:
         if self.shown is None:
             return "full"
         if lines == self.shown or now - self.last < self.min_interval:
@@ -176,7 +191,7 @@ class RefreshPolicy:
             return "full"
         return "partial"
 
-    def done(self, lines: list[str], kind: str, now: float) -> None:
+    def done(self, lines: list[str], kind: Refresh, now: float) -> None:
         self.shown, self.last = list(lines), now
         if kind == "full":
             self.last_full, self.partials = now, 0
@@ -191,7 +206,7 @@ def gps(timeout: float = 3.0) -> tuple[int, int]:
         with socket.create_connection(("127.0.0.1", 2947), timeout=timeout) as s:
             s.sendall(b'?WATCH={"enable":true,"json":true}\n')
             f = s.makefile("rb")
-            seen = set()
+            tpv = sky = False
             for _ in range(40):
                 line = f.readline()
                 if not line:
@@ -199,15 +214,15 @@ def gps(timeout: float = 3.0) -> tuple[int, int]:
                 msg = json.loads(line)
                 if msg.get("class") == "TPV":
                     mode = int(msg.get("mode", 0))
-                    seen.add("TPV")
+                    tpv = True
                 elif msg.get("class") == "SKY":
                     sats = msg.get("satellites") or []
                     used = int(msg.get("uSat", sum(1 for x in sats if x.get("used"))))
-                    seen.add("SKY")
-                if seen == {"TPV", "SKY"}:
+                    sky = True
+                if tpv and sky:
                     break
     except (OSError, ValueError):
-        pass
+        pass  # gpsd not running or garbled: shown as "GPS ?"
     return mode, used
 
 
@@ -263,40 +278,44 @@ def run_ok(*cmd: str) -> bool | None:
         return None
 
 
-def clock_synced() -> bool:
+def shutting_down() -> bool:
+    """Whether systemd is stopping the whole system (not just this service)."""
     try:
-        r = subprocess.run(["chronyc", "-c", "tracking"], capture_output=True, text=True, timeout=5)
+        r = subprocess.run(["systemctl", "is-system-running"], capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
         return False
-    fields = r.stdout.strip().split(",")
-    return (
-        r.returncode == 0
-        and len(fields) > 1
-        and fields[0] not in ("", "00000000", "7F7F0101")
-        and (fields[-1] != "Not synchronised")
-    )
+    return r.stdout.strip() == "stopping"
 
 
 def collect(login: tuple[str, str] | None) -> Status:
     mode, sats = gps()
-    status = Status(home=run_ok("/usr/local/sbin/on-home-wifi"), gps_mode=mode, satellites=sats)
+    sources, recent, kismet_up = {}, None, False
     if login:
         try:
-            status.sources = {
+            all_sources = kismet_get("/datasource/all_sources.json", login)
+            devices = kismet_get(f"/devices/last-time/-{RECENT}/devices.json", login, ["kismet.device.base.phyname"])
+        except (OSError, ValueError):
+            pass  # Kismet stopped (at home) or still starting: shown as "Kismet stopped"
+        else:
+            sources = {
                 src["kismet.datasource.name"]: source_state(src)
-                for src in kismet_get("/datasource/all_sources.json", login)
+                for src in all_sources
                 if src.get("kismet.datasource.name")
             }
-            status.recent = count_recent(
-                kismet_get(f"/devices/last-time/-{RECENT}/devices.json", login, ["kismet.device.base.phyname"])
-            )
-            status.kismet_up = True
-        except (OSError, ValueError):
-            pass
-    status.battery_percent, status.charging = battery(STATE_DIR / "battery.json", time.time())
-    status.clock_synced = clock_synced()
-    status.now = datetime.now()
-    return status
+            recent, kismet_up = count_recent(devices), True
+    percent, charging = battery(STATE_DIR / "battery.json", time.time())
+    return Status(
+        home=run_ok("/usr/local/sbin/on-home-wifi"),
+        gps_mode=mode,
+        satellites=sats,
+        kismet_up=kismet_up,
+        sources=sources,
+        recent=recent,
+        battery_percent=percent,
+        charging=charging,
+        clock_synced=chrony_synced(),
+        now=datetime.now(),
+    )
 
 
 def draw(lines: list[str], rotate: int = 0):
@@ -344,38 +363,16 @@ class Panel:
         self.epd.sleep()
 
 
-def init_logging() -> structlog.typing.FilteringBoundLogger:
-    """JSON lines when the unit sets LOG_FORMAT=json, as status-leds does."""
-    json_out = os.environ.get("LOG_FORMAT") == "json"
-    structlog.configure(
-        processors=[
-            structlog.processors.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso", utc=True),
-            lambda _, __, event_dict: {**event_dict, "logger": "eink-status", "service": "eink-status"},
-            structlog.processors.JSONRenderer() if json_out else structlog.dev.ConsoleRenderer(colors=False),
-        ],
-        logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=False,
-    )
-    return structlog.get_logger()
-
-
 def main() -> None:
-    log = init_logging()
+    log = init_logging("eink-status")
     config = load_config()
     panel = Panel(config["model"])
     policy = RefreshPolicy(config["min_interval"], config["full_every"], config["full_interval"])
     creds = Path(os.environ.get("CREDENTIALS_DIRECTORY", "/nonexistent")) / "kismet-httpd"
-    stop = False
-
-    def on_term(*_):
-        nonlocal stop
-        stop = True
-
-    signal.signal(signal.SIGTERM, on_term)
+    stop = stop_on_sigterm()
     log.info("started", model=config["model"], min_interval=config["min_interval"], full_every=config["full_every"])
     try:
-        while not stop:
+        while not stop.is_set():
             status = collect(credentials(creds))
             lines = screen_lines(status)
             now = time.monotonic()
@@ -387,19 +384,13 @@ def main() -> None:
                 else:
                     panel.partial(image)
                 policy.done(lines, kind, now)
-            end = time.monotonic() + config["poll"]
-            while not stop and time.monotonic() < end:
-                time.sleep(0.5)
+            stop.wait(config["poll"])
     finally:
         try:
             reason = (STATE_DIR / "shutdown-reason").read_text().strip()
         except OSError:
             reason = None
-        shutting_down = (
-            subprocess.run(["systemctl", "is-system-running"], capture_output=True, text=True).stdout.strip()
-            == "stopping"
-        )
-        panel.full(draw(off_lines(reason, shutting_down, datetime.now(), clock_synced()), config["rotate"]))
+        panel.full(draw(off_lines(reason, shutting_down(), datetime.now(), chrony_synced()), config["rotate"]))
         panel.sleep()
         log.info("stopped", reason=reason)
 
