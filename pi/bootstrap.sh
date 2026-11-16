@@ -4,6 +4,11 @@
 # off) with gpsd, the home-wifi stop, the log size watch and the wigle-sync
 # user. Idempotent; re-run after changing pi/.
 #
+# On a Raspberry Pi Zero 2 W (zero2w/pi-profile, or PI_PROFILE in the
+# settings) it also fits all that into 512 MB (zero2w/setup-zero2w.sh) and
+# skips the RGB status LEDs; EINK=1 and PISUGAR=1 add the handheld's e-ink
+# display and PiSugar battery. On brick69's Pi 3B+ none of that runs.
+#
 #   scp -r pi zaphod@<pi>:/tmp/wigle-pi
 #   ssh zaphod@<pi> 'sudo install -m 600 /tmp/wigle-pi/kismet-pi.env.example /etc/default/kismet-pi'
 #   ssh -t zaphod@<pi> 'sudoedit /etc/default/kismet-pi'
@@ -21,6 +26,8 @@ LOG_DIR=/var/log/kismet
 . "$SETTINGS"
 [[ -n ${HOME_WIFI_SSID:-} ]] || { echo "HOME_WIFI_SSID is empty in $SETTINGS" >&2; exit 1; }
 chmod 600 "$SETTINGS"
+PROFILE=$(PI_PROFILE=${PI_PROFILE:-auto} sh "$SRC/zero2w/pi-profile")
+echo "board profile: $PROFILE"
 
 # --- packages -----------------------------------------------------------------
 . /etc/os-release
@@ -125,7 +132,14 @@ systemctl start wifi-regdomain.service
 
 bash "$SRC/setup-kismet-size-watch.sh"
 bash "$SRC/metrics/setup-metrics.sh"
-bash "$SRC/leds/setup-leds.sh"
+bash "$SRC/setup-kismet-login.sh"
+if [[ $PROFILE == zero2w ]]; then
+    bash "$SRC/zero2w/setup-zero2w.sh"
+else
+    bash "$SRC/leds/setup-leds.sh"
+fi
+[[ ${PISUGAR:-0} == 1 ]] && bash "$SRC/pisugar/setup-pisugar.sh"
+[[ ${EINK:-0} == 1 ]] && bash "$SRC/eink/setup-eink.sh"
 if [[ -n ${WIGLE_SYNC_PUBKEY:-} ]]; then
     bash "$SRC/setup-pi-user.sh" "$WIGLE_SYNC_PUBKEY"
 else
@@ -156,7 +170,20 @@ check "chrony running" systemctl is-active chrony.service
 check "fake-hwclock has a saved time" test -s /etc/fake-hwclock.data
 check "Kismet waits for the clock" sh -c 'systemctl show -p Wants kismet.service | grep -q wait-for-clock.service'
 check "journal kept across reboots" test -d /var/log/journal
+if [[ $PROFILE == zero2w ]]; then
+    check "swap is zram only" sh -c 'swapon --noheadings --show=NAME | grep -q zram && ! swapon --noheadings --show=TYPE | grep -qx file'
+    check "Kismet's memory caps installed" test -s /etc/kismet/kismet_lowmem.conf
+    # The one OTG port must be a USB host for the hub (not a pwnagotchi's gadget).
+    check "USB port is a host (the hub)" sh -c 'ls /sys/bus/usb/devices/ | grep -q "^usb"'
+fi
+if [[ ${PISUGAR:-0} == 1 ]]; then
+    check "pisugar-watch running" systemctl is-active pisugar-watch.service
+    # Its metrics say whether pisugar-server answered it (the first poll is at start).
+    check "pisugar-server answers" sh -c 'for _ in 1 2 3 4 5 6 7 8 9 10; do grep -qx "pi_pisugar_up 1" /run/node-exporter-textfile/pisugar.prom 2>/dev/null && exit 0; sleep 1; done; exit 1'
+fi
+[[ ${EINK:-0} == 1 ]] && check "eink-status running" systemctl is-active eink-status.service
 check "gpsd sees a device" sh -c 'timeout 10 gpspipe -w -n 5 2>/dev/null | grep -q "\"class\":\"DEVICES\".*\"path\""'
 (( changed_links )) && echo "note: interface names changed; reboot to apply them"
 (( bt_reboot )) && echo "note: reboot to turn the onboard Bluetooth off (the dongle becomes hci0)"
+[[ $PROFILE == zero2w ]] && echo "note: the zero2w profile's swap, GPU, SPI and I2C changes take effect at the next boot"
 exit $status

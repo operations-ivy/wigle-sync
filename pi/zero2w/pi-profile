@@ -1,0 +1,19 @@
+#!/bin/sh
+# Prints the board profile bootstrap.sh builds for: "zero2w" on a Raspberry Pi
+# Zero 2 W (512 MB, one USB OTG port, the handheld), "default" on anything
+# else (brick69's Pi 3B+). PI_PROFILE in /etc/default/kismet-pi overrides the
+# detection: auto (or empty), default, zero2w.
+MODEL=${MODEL:-/proc/device-tree/model}
+
+case ${PI_PROFILE:-auto} in
+    auto) ;;
+    default | zero2w) echo "$PI_PROFILE"; exit 0 ;;
+    *) echo "unknown PI_PROFILE '$PI_PROFILE' (auto, default, zero2w)" >&2; exit 2 ;;
+esac
+
+# The model string ends in a NUL; tr drops it so the match sees plain text.
+model=$(tr -d '\0' < "$MODEL" 2>/dev/null)
+case $model in
+    "Raspberry Pi Zero 2 W"*) echo zero2w ;;
+    *) echo default ;;
+esac

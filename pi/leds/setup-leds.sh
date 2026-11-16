@@ -59,20 +59,8 @@ if [[ -f $config ]]; then
     done
 fi
 
-# Kismet's web login (Kismet runs as $KISMET_USER, bootstrap.sh). Until one is
-# set, whoever reaches port 2501 first gets to choose it; this sets a random
-# one, kept only here. status-leds.service reads it from this path.
-KISMET_USER=${KISMET_USER:-zaphod}
-httpd="$(getent passwd "$KISMET_USER" | cut -d: -f6)/.kismet/kismet_httpd.conf"
-if ! grep -q '^httpd_password=.' "$httpd" 2>/dev/null; then
-    install -d -m 700 -o "$KISMET_USER" -g "$KISMET_USER" "$(dirname "$httpd")"
-    ( umask 077; printf 'httpd_username=wigle\nhttpd_password=%s\n' "$(openssl rand -hex 16)" > "$httpd" )
-    chown "$KISMET_USER:$KISMET_USER" "$httpd"
-    echo "set Kismet's web login in $httpd"
-    if systemctl is-active -q kismet.service; then
-        systemctl restart kismet.service
-    fi
-fi
+# Kismet's web login, which status-leds.py asks Kismet with.
+bash "$SRC/../setup-kismet-login.sh"
 
 # Renamed: led2-alert (LED2 only) became status-leds.
 if [[ -e /etc/systemd/system/led2-alert.service ]]; then
