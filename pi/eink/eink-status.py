@@ -208,12 +208,14 @@ def screen_lines(s: Status) -> list[str]:
         heard = "Heard -"
     else:
         heard = f"Heard {rounded(s.recent.get('wifi', 0))} Wi-Fi  {rounded(s.recent.get('bluetooth', 0))} BT"
-    battery = [] if s.battery_percent is None else [f"Battery {s.battery_percent:.0f}%" + (" +" if s.charging else "")]
     clock = s.now.strftime("%H:%M") + ("" if s.clock_synced else " ?")
     if s.to_send:
         clock += f"  {s.to_send} to send"
     sync = sync_text(s.last_sync, s.now, s.clock_synced)
-    return [f"{where}  {gps}", sources, heard, *battery, sync, clock]
+    lines = [f"{where}  {gps}", sources, heard]
+    if s.battery_percent is not None:  # left out without a reading
+        lines.append(f"Battery {s.battery_percent:.0f}%" + (" +" if s.charging else ""))
+    return [*lines, sync, clock]
 
 
 def off_lines(reason: str | None, shutting_down: bool, now: datetime, clock_synced: bool) -> list[str]:
