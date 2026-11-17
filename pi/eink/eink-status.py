@@ -2,13 +2,14 @@
 """The wardriver's status on its e-ink display (a Waveshare 2.13", as on a
 pwnagotchi): what matters on the road, readable at a glance.
 
-    AWAY  GPS 3D 9 sat
-    ------------------------------
-    BT ok   Wi-Fi ok
-    Heard 245 Wi-Fi  30 BT   (ᵔ◡◡ᵔ)
-    Battery 78%
-    Sync 3h ago              stoked
-    14:32  2 to send
+    +-[circuit-board border, a chip in each corner]-+
+    | root@scootypuffsr:~#        (inverted bar)     |
+    | $ away gps 3d 9 sat          |   [robot in     |
+    | $ kismet BT ok wifi ok       |   sunglasses]   |
+    | $ heard 245w 30bt            |                 |
+    | $ sync 3h ago                |      cool       |
+    | 14:32 2 to send_             |                 |
+    +-----------------------------------------------+
 
 - Home or away: on the home Wi-Fi or not (on-home-wifi, as pi-metrics uses).
 - GPS: gpsd's fix (none, 2D, 3D) and the satellites in it.
@@ -24,13 +25,18 @@ pwnagotchi): what matters on the road, readable at a glance.
   "Nh ago" with the real time, the date and time without it.
 - The time, with "?" until chrony has the real time, and how many sessions
   are waiting for wigle-sync (.wiglecsv files still in the capture directory).
-- A pwnagotchi face on the right that sums it up (mood): stoked (capturing with
-  a fix), searching (no fix), sleepy (home, Kismet stopped), uh oh (a source
-  down, or Kismet stopped away from home), low (battery at 20% or under,
-  not charging). Every screen has one: an error reading Kismet, gpsd or the
-  battery shows an ERROR screen with uh oh, and the last screen, left while
-  the Pi is off, sleeps, is low after a low-battery shutdown, or uh oh if the
-  display crashed.
+- The look (the user, 2026-11-17): a root shell in Terminus, the Linux
+  console's bitmap font, inside a circuit-board border (eink_art.py).
+- The mascot on the right, an original sunglasses robot with one sprite for
+  each of pwnagotchi's 25 face names (eink_art.py), picked by emotion():
+  cool capturing with a fix (excited when it hears a lot), looking left and
+  right while it waits for one, sleep at home with Kismet stopped (upload
+  while sessions wait to go), broken with a source down, sad with Kismet
+  stopped away from home, demotivated on a low battery, awake on the first
+  screen. Every screen has one: an error reading Kismet, gpsd or the battery
+  shows an ERROR screen with debug, and the last screen, left while the Pi
+  is off, sleeps, is demotivated after a low-battery shutdown, or broken if
+  the display crashed.
 
 E-ink wears with refreshes and ghosts with partial ones, so the screen is
 redrawn only when its text changes, by partial refresh at most every
@@ -63,6 +69,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+from eink_art import BORDER
+from eink_art import circuit_border
+from eink_art import COLUMN
+from eink_art import draw_robot
+from eink_art import Emotion
+from eink_art import label
 from handheld_common import chrony_synced
 from handheld_common import init_logging
 from handheld_common import stop_on_sigterm
@@ -75,7 +87,8 @@ KISMET = "http://127.0.0.1:2501"
 # Where Kismet logs and wigle-sync collects (its PI_REMOTE_DIR, PI_ARCHIVE_DIR).
 CAPTURE_DIR = Path(os.environ.get("KISMET_LOG_DIR", "/var/log/kismet"))
 UPLOADED_DIR = CAPTURE_DIR / "uploaded"
-LOW_BATTERY = 20  # percent: the mascot looks low at or under this, not charging
+LOW_BATTERY = 20  # percent: the mascot is demotivated at or under this, not charging
+EXCITED = 400  # devices heard in the last minute: cool to excited (brick69: median 251, max 601)
 RECENT = 60  # seconds: "heard in the last minute", as pi-metrics counts it
 BATTERY_STALE = 180  # seconds: an older battery reading isn't shown
 MODELS = ("epd2in13_V2", "epd2in13_V3", "epd2in13_V4")
@@ -89,12 +102,11 @@ DEFAULTS = {
 }
 WIDTH, HEIGHT = 250, 122  # the 2.13" panels, landscape
 # Terminus, the Linux console's bitmap font (fonts-terminus-otb; the user,
-# 2026-11-17: retro): crisp on a 1-bit panel. Its sizes are the bitmap strikes
-# it has, in pixels. The mascot stays in DejaVu Sans Mono (FACE_FONT), which
-# has its characters.
+# 2026-11-17: retro): crisp on a 1-bit panel. Sizes are its bitmap strikes, in
+# pixels; at 12 a character is 6 px wide.
 FONT = "/usr/share/fonts/opentype/terminus/terminus-normal.otb"
 FONT_BOLD = "/usr/share/fonts/opentype/terminus/terminus-bold.otb"
-BOLD_SIZE, BODY_SIZE, SMALL_SIZE = 16, 14, 12  # pixels: the first line, the body, the last line
+TITLE_SIZE, BODY_SIZE = 12, 12  # pixels: the title bar, everything else
 
 
 @dataclass
@@ -113,6 +125,7 @@ class Status:
     to_send: int = 0  # sessions waiting for wigle-sync
     clock_synced: bool = False
     now: datetime = field(default_factory=datetime.now)
+    host: str = "wigle"  # the prompt's hostname
 
 
 def load_config(path: Path = CONFIG) -> dict:
@@ -152,16 +165,16 @@ def source_state(src: dict) -> str:
 
 def source_label(name: str) -> str:
     """Kismet's source names (kismet_site.conf: wlan_mon0, usb_bt) as shown."""
-    return "BT" if "bt" in name.lower() or name.startswith("hci") else "Wi-Fi"
+    return "bt" if "bt" in name.lower() or name.startswith("hci") else "wifi"
 
 
 def gps_text(mode: int, satellites: int) -> str:
-    """gpsd's fix as shown: "GPS 3D 9 sat", "GPS no fix", or "GPS ?"."""
+    """gpsd's fix as shown: "gps 3d 9 sat", "gps no fix", or "gps ?"."""
     if mode in (2, 3):
-        return f"GPS {mode}D {satellites} sat"
+        return f"gps {mode}d {satellites} sat"
     if mode == 1:
-        return "GPS no fix"
-    return "GPS ?"
+        return "gps no fix"
+    return "gps ?"
 
 
 def ago(seconds: float) -> str:
@@ -173,53 +186,66 @@ def ago(seconds: float) -> str:
 
 
 def sync_text(last: float | None, now: datetime, clock_synced: bool) -> str:
-    """The last sync as shown: "Sync 3h ago", "Sync never". Without
+    """The last sync as shown: "sync 3h ago", "sync never". Without
     the real time "ago" can't be trusted, so it's the sync's own date and time
     (taken at home, with the real time)."""
     if last is None:
-        return "Sync never"
+        return "sync never"
     if clock_synced:
-        return f"Sync {ago(now.timestamp() - last)} ago"
-    return "Sync " + datetime.fromtimestamp(last).strftime("%m-%d %H:%M")
+        return f"sync {ago(now.timestamp() - last)} ago"
+    return "sync " + datetime.fromtimestamp(last).strftime("%m-%d %H:%M")
 
 
-Mood = Literal["stoked", "searching", "sleepy", "uh oh", "low"]
+# Emotions that take turns: five minutes each for the pairs, two for each
+# upload step, so the panel isn't redrawn every poll for them.
+LOOKING: tuple[Emotion, Emotion] = ("look_l", "look_r")
+SLEEPING: tuple[Emotion, Emotion] = ("sleep", "sleep2")
+UPLOADING: tuple[Emotion, Emotion, Emotion] = ("upload", "upload1", "upload2")
 
 
-def mood(s: Status) -> Mood:
-    """The mascot's face, from the worst thing on the screen up."""
+def emotion(s: Status) -> Emotion:
+    """The robot's emotion, from the worst thing on the screen up: looking
+    left and right while it waits for a fix, sleep and sleep2 at home, the
+    upload arrows stepping while sessions wait to go."""
+    turn = s.now.minute // 5 % 2  # which of a pair, for five minutes
     if s.battery_percent is not None and s.battery_percent <= LOW_BATTERY and not s.charging:
-        return "low"
+        return "demotivated"
     if not s.kismet_up:
-        return "uh oh" if s.home is False else "sleepy"
+        if s.home is False:
+            return "sad"
+        if s.home and s.to_send:
+            return UPLOADING[s.now.minute // 2 % len(UPLOADING)]
+        return SLEEPING[turn]
     if not s.sources or any(state != "ok" for state in s.sources.values()):
-        return "uh oh"
-    return "stoked" if s.gps_mode in (2, 3) else "searching"
+        return "broken"
+    if s.gps_mode in (2, 3):
+        heard = sum((s.recent or {}).values())
+        return "excited" if heard >= EXCITED else "cool"
+    return LOOKING[turn]
 
 
 def screen_lines(s: Status) -> list[str]:
-    """The screen's text, top to bottom: the first line is drawn bold, the
-    last small. Pure, so the layout is tested without a panel."""
-    where = {True: "HOME", False: "AWAY", None: "?"}[s.home]
-    gps = gps_text(s.gps_mode, s.satellites)
+    """The screen's text, top to bottom: the first line is the title bar (a
+    root prompt), the rest shell lines, the last ending in a cursor. Pure, so
+    the layout is tested without a panel."""
+    where = {True: "home", False: "away", None: "?"}[s.home]
     if not s.kismet_up:
-        sources = "Kismet stopped"
+        sources = "$ kismet stopped"
     elif not s.sources:
-        sources = "Kismet: no sources"
+        sources = "$ kismet: no sources"
     else:
-        sources = "   ".join(f"{source_label(n)} {state}" for n, state in sorted(s.sources.items()))
+        sources = "$ kismet " + " ".join(f"{source_label(n)} {state}" for n, state in sorted(s.sources.items()))
     if s.recent is None:
-        heard = "Heard -"
+        heard = "$ heard -"
     else:
-        heard = f"Heard {rounded(s.recent.get('wifi', 0))} Wi-Fi  {rounded(s.recent.get('bluetooth', 0))} BT"
+        heard = f"$ heard {rounded(s.recent.get('wifi', 0))}w {rounded(s.recent.get('bluetooth', 0))}bt"
+    lines = [f"root@{s.host}:~#", f"$ {where} {gps_text(s.gps_mode, s.satellites)}", sources, heard]
+    if s.battery_percent is not None:  # left out without a reading
+        lines.append(f"$ batt {s.battery_percent:.0f}%" + (" +" if s.charging else ""))
     clock = s.now.strftime("%H:%M") + ("" if s.clock_synced else " ?")
     if s.to_send:
-        clock += f"  {s.to_send} to send"
-    sync = sync_text(s.last_sync, s.now, s.clock_synced)
-    lines = [f"{where}  {gps}", sources, heard]
-    if s.battery_percent is not None:  # left out without a reading
-        lines.append(f"Battery {s.battery_percent:.0f}%" + (" +" if s.charging else ""))
-    return [*lines, sync, clock]
+        clock += f" {s.to_send} to send"
+    return [*lines, f"$ {sync_text(s.last_sync, s.now, s.clock_synced)}", clock + "_"]
 
 
 def off_lines(reason: str | None, shutting_down: bool, now: datetime, clock_synced: bool) -> list[str]:
@@ -234,12 +260,12 @@ def off_lines(reason: str | None, shutting_down: bool, now: datetime, clock_sync
     return ["DISPLAY STOPPED", "the Pi may still be on", at, "", "wigle-sync"]
 
 
-def off_mood(reason: str | None, crashed: bool) -> Mood:
-    """The face left on the last screen. `reason` is pisugar-watch's, only
+def off_mood(reason: str | None, crashed: bool) -> Emotion:
+    """The robot left on the last screen. `reason` is pisugar-watch's, only
     ever a low battery."""
     if crashed:
-        return "uh oh"
-    return "low" if reason else "sleepy"
+        return "broken"
+    return "demotivated" if reason else "sleep"
 
 
 def error_lines(error: Exception, now: datetime, clock_synced: bool) -> list[str]:
@@ -248,15 +274,15 @@ def error_lines(error: Exception, now: datetime, clock_synced: bool) -> list[str
     return ["ERROR", type(error).__name__[:20], "see its journal", "", at]
 
 
-def status_screen(get_status: Callable[[], Status], log) -> tuple[list[str], Mood]:
-    """The lines and the face for this poll: an ERROR screen (uh oh) when
+def status_screen(get_status: Callable[[], Status], log) -> tuple[list[str], Emotion]:
+    """The lines and the robot's emotion for this poll: an ERROR screen (debug) when
     collecting fails, so the mascot stays and the loop keeps going."""
     try:
         status = get_status()
     except Exception as e:  # anything: the display must outlive it
         log.exception("collect failed")
-        return error_lines(e, datetime.now(), chrony_synced()), "uh oh"
-    return screen_lines(status), mood(status)
+        return error_lines(e, datetime.now(), chrony_synced()), "debug"
+    return screen_lines(status), emotion(status)
 
 
 @dataclass
@@ -423,45 +449,41 @@ def collect(login: tuple[str, str] | None) -> Status:
         to_send=to_send(CAPTURE_DIR),
         clock_synced=chrony_synced(),
         now=datetime.now(),
+        host=socket.gethostname(),
     )
 
 
-# The mascot: pwnagotchi's faces (pwnagotchi/ui/faces.py, by its name for
-# each), in its font, DejaVu Sans Mono Bold.
-FACES: dict[Mood, str] = {
-    "stoked": "(ᵔ◡◡ᵔ)",  # EXCITED
-    "searching": "( ⚆_⚆)",  # LOOK_R
-    "sleepy": "(⇀‿‿↼)",  # SLEEP
-    "uh oh": "(☓‿‿☓)",  # BROKEN
-    "low": "(≖__≖)",  # DEMOTIVATED
-}
-FACE_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
-FACE_SIZE = 19  # points: six monospaced characters, 69 px wide
-FACE_COLUMN = 70  # px on the right for the face and its mood
+FACE_COLUMN = COLUMN  # px on the right for the robot and its label
+TITLE_BAR = 15  # px: the inverted title bar's height
+ROW = 15  # px between shell lines, when they fit (less with a battery line)
 
 
-def draw(lines: list[str], face: Mood, rotate: int = 0):
-    """The lines as a 1-bit landscape image for the panel: the first line
-    bold over a rule, the last small, and the mascot on the right with its
-    mood under it. Every screen has the mascot."""
+def draw(lines: list[str], face: Emotion, rotate: int = 0):
+    """The lines as a 1-bit landscape image for the panel, inside the circuit
+    border: the first line in an inverted title bar, the rest below it, and
+    the robot right of a divider with its emotion under it. Every screen has
+    the robot."""
     from PIL import Image
     from PIL import ImageDraw
     from PIL import ImageFont
 
     image = Image.new("1", (WIDTH, HEIGHT), 255)
     pen = ImageDraw.Draw(image)
-    bold = ImageFont.truetype(FONT_BOLD, BOLD_SIZE)
-    body, small = ImageFont.truetype(FONT, BODY_SIZE), ImageFont.truetype(FONT, SMALL_SIZE)
-    y = 2
-    for i, line in enumerate(lines):
-        font = bold if i == 0 else small if i == len(lines) - 1 else body
-        pen.text((4, y), line, font=font, fill=0)
-        y += 26 if i == 0 else 19
-    if lines and lines[0] not in ("OFF", "DISPLAY STOPPED", "ERROR"):
-        pen.line((0, 24, WIDTH, 24), fill=0)
-    middle = WIDTH - FACE_COLUMN / 2
-    pen.text((middle, 50), FACES[face], font=ImageFont.truetype(FACE_FONT, FACE_SIZE), fill=0, anchor="ma")
-    pen.text((middle, 82), face, font=small, fill=0, anchor="ma")
+    circuit_border(pen, WIDTH, HEIGHT)
+    title, body = ImageFont.truetype(FONT_BOLD, TITLE_SIZE), ImageFont.truetype(FONT, BODY_SIZE)
+    left, right, top, bottom = BORDER + 1, WIDTH - 2 - BORDER, BORDER + 1, HEIGHT - 2 - BORDER
+    pen.rectangle((left, top, right, top + TITLE_BAR - 1), fill=0)
+    if lines:
+        pen.text((left + 3, top + 1), lines[0], font=title, fill=255)
+    rows, below = lines[1:], top + TITLE_BAR + 3  # the shell lines start under the bar
+    step = min(ROW, (bottom - below) // max(1, len(rows)))
+    for i, line in enumerate(rows):
+        pen.text((left + 5, below + i * step), line, font=body, fill=0)
+    divider = right - FACE_COLUMN
+    pen.line((divider, below, divider, bottom - 1), fill=0)
+    middle = (divider + right) // 2 + 1
+    draw_robot(pen, face, middle, below + 1)
+    pen.text((middle, bottom - BODY_SIZE - 1), label(face), font=body, fill=0, anchor="ma")
     return image.rotate(180) if rotate == 180 else image
 
 
@@ -499,10 +521,14 @@ def main() -> None:
     creds = Path(os.environ.get("CREDENTIALS_DIRECTORY", "/nonexistent")) / "kismet-httpd"
     stop = stop_on_sigterm()
     log.info("started", model=config["model"], min_interval=config["min_interval"], full_every=config["full_every"])
-    crashed = False
+    crashed, first = False, True
     try:
         while not stop.is_set():
             lines, face = status_screen(lambda: collect(credentials(creds)), log)
+            # The robot wakes up with the display: the first good screen is
+            # awake (an ERROR screen keeps its debug, and the next one wakes).
+            if first and face != "debug":
+                face, first = "awake", False
             shown = [*lines, face]  # what a redraw compares
             now = time.monotonic()
             kind = policy.decide(shown, now)
