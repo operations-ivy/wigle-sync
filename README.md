@@ -100,6 +100,13 @@ with `wlan_host`, and with it off the dongle is always `hci0`. `bootstrap.sh`
 unblocks the adapter if it comes up soft-blocked, and checks that `hci0` is the
 USB one (`btusb`); `pi_bt_dongle` says the same on the brick69 dashboard.
 
+The Pi Zero 2 W handheld (the `zero2w` profile) uses its **onboard** Bluetooth
+as `hci0` instead, with no dongle: `bootstrap.sh` leaves `disable-bt` out (and
+takes it out if an earlier run added it) and checks that `hci0` is the onboard
+chip (`hci_uart_bcm`). Kismet's source keeps the name `usb_bt`, and
+`pi_bt_dongle` is 0 there. Its Wi-Fi capture stays on the USB dongle: the
+onboard radio is 2.4 GHz only (and needs nexmon for monitor mode).
+
 ### Status LEDs
 
 Three DIYables RGB LED modules sit on the header, stacked LED1 (top) to LED3;
