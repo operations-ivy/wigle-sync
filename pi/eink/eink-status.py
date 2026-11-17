@@ -25,7 +25,10 @@ pwnagotchi): what matters on the road, readable at a glance.
 - A pwnagotchi face on the right that sums it up (mood): stoked (capturing with
   a fix), searching (no fix), sleepy (home, Kismet stopped), uh oh (a source
   down, or Kismet stopped away from home), low (battery at 20% or under,
-  not charging). It sleeps on the last screen.
+  not charging). Every screen has one: an error reading Kismet, gpsd or the
+  battery shows an ERROR screen with uh oh, and the last screen, left while
+  the Pi is off, sleeps, is low after a low-battery shutdown, or uh oh if the
+  display crashed.
 
 E-ink wears with refreshes and ghosts with partial ones, so the screen is
 redrawn only when its text changes, by partial refresh at most every
@@ -51,6 +54,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import field
 from datetime import datetime
@@ -223,6 +227,31 @@ def off_lines(reason: str | None, shutting_down: bool, now: datetime, clock_sync
     if shutting_down:
         return ["OFF", "shut down", at, "", "wigle-sync"]
     return ["DISPLAY STOPPED", "the Pi may still be on", at, "", "wigle-sync"]
+
+
+def off_mood(reason: str | None, crashed: bool) -> Mood:
+    """The face left on the last screen. `reason` is pisugar-watch's, only
+    ever a low battery."""
+    if crashed:
+        return "uh oh"
+    return "low" if reason else "sleepy"
+
+
+def error_lines(error: Exception, now: datetime, clock_synced: bool) -> list[str]:
+    """The screen while a look at Kismet, gpsd or the battery fails."""
+    at = now.strftime("%H:%M") + ("" if clock_synced else " ?")
+    return ["ERROR", type(error).__name__[:20], "see its journal", "", at]
+
+
+def status_screen(get_status: Callable[[], Status], log) -> tuple[list[str], Mood]:
+    """The lines and the face for this poll: an ERROR screen (uh oh) when
+    collecting fails, so the mascot stays and the loop keeps going."""
+    try:
+        status = get_status()
+    except Exception as e:  # anything: the display must outlive it
+        log.exception("collect failed")
+        return error_lines(e, datetime.now(), chrony_synced()), "uh oh"
+    return screen_lines(status), mood(status)
 
 
 @dataclass
@@ -406,10 +435,10 @@ FACE_SIZE = 19  # points: six monospaced characters, 69 px wide
 FACE_COLUMN = 70  # px on the right for the face and its mood
 
 
-def draw(lines: list[str], rotate: int = 0, face: Mood | None = None):
+def draw(lines: list[str], face: Mood, rotate: int = 0):
     """The lines as a 1-bit landscape image for the panel: the first line
     bold over a rule, the last small, and the mascot on the right with its
-    mood under it."""
+    mood under it. Every screen has the mascot."""
     from PIL import Image
     from PIL import ImageDraw
     from PIL import ImageFont
@@ -423,12 +452,11 @@ def draw(lines: list[str], rotate: int = 0, face: Mood | None = None):
         font = bold if i == 0 else small if i == len(lines) - 1 else body
         pen.text((4, y), line, font=font, fill=0)
         y += 26 if i == 0 else 19
-    if lines and lines[0] not in ("OFF", "DISPLAY STOPPED"):
+    if lines and lines[0] not in ("OFF", "DISPLAY STOPPED", "ERROR"):
         pen.line((0, 24, WIDTH, 24), fill=0)
-    if face:
-        middle = WIDTH - FACE_COLUMN / 2
-        pen.text((middle, 50), FACES[face], font=ImageFont.truetype(FACE_FONT, FACE_SIZE), fill=0, anchor="ma")
-        pen.text((middle, 82), face, font=small, fill=0, anchor="ma")
+    middle = WIDTH - FACE_COLUMN / 2
+    pen.text((middle, 50), FACES[face], font=ImageFont.truetype(FACE_FONT, FACE_SIZE), fill=0, anchor="ma")
+    pen.text((middle, 82), face, font=small, fill=0, anchor="ma")
     return image.rotate(180) if rotate == 180 else image
 
 
@@ -466,30 +494,33 @@ def main() -> None:
     creds = Path(os.environ.get("CREDENTIALS_DIRECTORY", "/nonexistent")) / "kismet-httpd"
     stop = stop_on_sigterm()
     log.info("started", model=config["model"], min_interval=config["min_interval"], full_every=config["full_every"])
+    crashed = False
     try:
         while not stop.is_set():
-            status = collect(credentials(creds))
-            lines, face = screen_lines(status), mood(status)
+            lines, face = status_screen(lambda: collect(credentials(creds)), log)
             shown = [*lines, face]  # what a redraw compares
             now = time.monotonic()
             kind = policy.decide(shown, now)
             if kind:
-                image = draw(lines, config["rotate"], face)
+                image = draw(lines, face, config["rotate"])
                 if kind == "full":
                     panel.full(image)
                 else:
                     panel.partial(image)
                 policy.done(shown, kind, now)
             stop.wait(config["poll"])
+    except BaseException:
+        crashed = True
+        raise
     finally:
         try:
             reason = (STATE_DIR / "shutdown-reason").read_text().strip()
         except OSError:
             reason = None
         last = off_lines(reason, shutting_down(), datetime.now(), chrony_synced())
-        panel.full(draw(last, config["rotate"], "sleepy"))
+        panel.full(draw(last, off_mood(reason, crashed), config["rotate"]))
         panel.sleep()
-        log.info("stopped", reason=reason)
+        log.info("stopped", reason=reason, crashed=crashed)
 
 
 if __name__ == "__main__":

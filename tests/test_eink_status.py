@@ -286,3 +286,64 @@ def test_text_clears_the_mascot(status):
     for line in lines[1:-1]:
         assert 4 + body.getlength(line) < mascot_left, line
     assert 4 + small.getlength(lines[-1]) < mascot_left
+
+
+# Every screen has the mascot (the user, 2026-11-17), errors included.
+
+
+class FakeLog:
+    def __init__(self):
+        self.errors = []
+
+    def exception(self, event, **kw):
+        self.errors.append(event)
+
+
+def test_a_collect_error_shows_an_error_screen_with_the_mascot():
+    def broken():
+        raise KeyError("kismet.device.base.phyname")
+
+    log = FakeLog()
+    lines, face = eink.status_screen(broken, log)
+    assert lines[:2] == ["ERROR", "KeyError"]
+    assert face == "uh oh"
+    assert log.errors == ["collect failed"]
+
+
+def test_a_good_poll_shows_the_status_and_its_mood():
+    lines, face = eink.status_screen(driving, FakeLog())
+    assert lines == eink.screen_lines(driving())
+    assert face == eink.mood(driving())
+
+
+@pytest.mark.parametrize(
+    ("reason", "crashed", "face"),
+    [(None, False, "sleepy"), ("battery 9%", False, "low"), (None, True, "uh oh"), ("battery 9%", True, "uh oh")],
+)
+def test_the_last_screen_keeps_a_mascot_that_fits_why(reason, crashed, face):
+    assert eink.off_mood(reason, crashed) == face
+
+
+def test_draw_needs_a_face():
+    with pytest.raises(TypeError):
+        eink.draw(["OFF"])  # pylint: disable=no-value-for-parameter
+
+
+@pytest.mark.parametrize(
+    "lines",
+    [
+        eink.error_lines(KeyError("x"), NOON, False),
+        eink.error_lines(ConnectionResetError(), NOON, True),
+        eink.off_lines("battery 9%", True, NOON, False),
+        eink.off_lines(None, False, NOON, False),
+    ],
+)
+def test_error_and_last_screens_clear_the_mascot(lines):
+    image_font = pytest.importorskip("PIL.ImageFont")
+    if not Path(eink.FONT).exists():
+        pytest.skip("no DejaVu fonts")
+    body, small = image_font.truetype(eink.FONT, eink.BODY_SIZE), image_font.truetype(eink.FONT, eink.SMALL_SIZE)
+    mascot_left = eink.WIDTH - eink.FACE_COLUMN
+    for line in lines[1:-1]:
+        assert 4 + body.getlength(line) < mascot_left, line
+    assert 4 + small.getlength(lines[-1]) < mascot_left
