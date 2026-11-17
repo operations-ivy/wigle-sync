@@ -157,11 +157,7 @@ def render_metrics(r: Reading, shutdown_percent: float) -> str:
             return
         lines.extend([f"# HELP {name} {doc}", f"# TYPE {name} gauge", f"{name} {value}"])
 
-    gauge(
-        "pi_pisugar_up",
-        "1 while the PiSugar gives battery readings (pisugar-server answers and reaches the board).",
-        int(r.ok),
-    )
+    gauge("pi_pisugar_up", "1 while the PiSugar gives battery readings.", int(r.ok))
     gauge("pi_battery_percent", "The PiSugar battery's level (pisugar-server's estimate from its voltage).", r.percent)
     gauge("pi_battery_volts", "The PiSugar battery's voltage.", r.volts)
     gauge(

@@ -198,22 +198,28 @@ def fake_server(tmp_path):
 
 
 def test_reading_over_the_socket(fake_server):
-    reading, up = pw.PiSugar(fake_server).reading()
-    assert up
+    reading, answered = pw.PiSugar(fake_server).reading()
+    assert answered
     assert reading == pw.Reading(64.2, 3.88, False)
 
 
 def test_no_server(tmp_path):
-    reading, up = pw.PiSugar(str(tmp_path / "none.sock"), timeout=0.5).reading()
-    assert not up
+    reading, answered = pw.PiSugar(str(tmp_path / "none.sock"), timeout=0.5).reading()
+    assert not answered
     assert reading == pw.Reading(None, None, None)
 
 
-def test_board_state_tells_a_silent_board_from_a_silent_server():
-    # pisugar-server answers "I2C not connected" when the board's pins don't touch.
-    assert pw.board_state(pw.Reading(77.5, 3.95, False), True) == "battery readings"
-    assert "the board isn't on I2C" in pw.board_state(pw.Reading(None, None, None), True)
-    assert pw.board_state(pw.Reading(None, None, None), False) == "pisugar-server not answering"
+@pytest.mark.parametrize(
+    ("reading", "answered", "expected"),
+    [
+        (pw.Reading(77.5, 3.95, False), True, "battery readings"),
+        # pisugar-server answers "I2C not connected" when the board's pins don't touch.
+        (pw.Reading(None, None, None), True, "the board isn't on I2C"),
+        (pw.Reading(None, None, None), False, "pisugar-server not answering"),
+    ],
+)
+def test_board_state_tells_a_silent_board_from_a_silent_server(reading, answered, expected):
+    assert expected in pw.board_state(reading, answered)
 
 
 def test_server_answering_without_the_board_is_not_up():
