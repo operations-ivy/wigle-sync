@@ -206,9 +206,9 @@ it). On brick69's Pi 3B+ the profile is `default` and nothing below runs.
 - **`EINK=1`**: `eink-status.service` (`pi/eink/`) shows home or away, the
   GPS fix, Kismet's sources, devices heard in the last minute, the battery,
   the last sync (when wigle-sync last moved a session into `uploaded/`), the
-  time and how many sessions wait to be sent, with a little pixel mascot
-  whose face sums it up (stoked, searching, sleepy, uh oh, low battery). It asks the same places pi-metrics does (Kismet's REST API,
-  gpsd, `on-home-wifi`) and redraws only when the text changes: a partial
+  time and how many sessions wait to be sent, with one of pwnagotchi's faces
+  to sum it up (stoked, searching, sleepy, uh oh, low battery). It asks the
+  same places pi-metrics does (Kismet's REST API, gpsd, `on-home-wifi`) and redraws only when the text changes: a partial
   refresh at most every 30 s, a full one after 30 partial ones or 30
   minutes, so the panel neither wears nor ghosts. Its last screen, left on
   the panel while the Pi is off, says why it stopped. Waveshare's Python

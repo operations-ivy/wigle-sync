@@ -4,9 +4,9 @@ pwnagotchi): what matters on the road, readable at a glance.
 
     AWAY  GPS 3D 9 sat
     ------------------------------
-    BT ok   Wi-Fi ok        (mascot)
-    Heard 245 Wi-Fi  30 BT  (      )
-    Battery 78%             (      )
+    BT ok   Wi-Fi ok
+    Heard 245 Wi-Fi  30 BT   (ᵔ◡◡ᵔ)
+    Battery 78%
     Sync 3h ago              stoked
     14:32  2 to send
 
@@ -22,7 +22,7 @@ pwnagotchi): what matters on the road, readable at a glance.
   "Nh ago" with the real time, the date and time without it.
 - The time, with "?" until chrony has the real time, and how many sessions
   are waiting for wigle-sync (.wiglecsv files still in the capture directory).
-- A mascot on the right whose face sums it up (mood): stoked (capturing with
+- A pwnagotchi face on the right that sums it up (mood): stoked (capturing with
   a fix), searching (no fix), sleepy (home, Kismet stopped), uh oh (a source
   down, or Kismet stopped away from home), low (battery at 20% or under,
   not charging). It sleeps on the last screen.
@@ -56,7 +56,6 @@ from dataclasses import field
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
-from typing import NamedTuple
 
 from handheld_common import chrony_synced
 from handheld_common import init_logging
@@ -393,85 +392,18 @@ def collect(login: tuple[str, str] | None) -> Status:
     )
 
 
-# The mascot: a little radio with an antenna, 16 x 16 pixels drawn 4x. Its
-# body is fixed; the antenna's waves (capturing), a "z" (asleep), the eyes
-# and the mouth change with its mood.
-BODY = [
-    ".......##.......",
-    ".......##.......",
-    ".......##.......",
-    ".......##.......",
-    ".......##.......",
-    "....########....",
-    "...#........#...",
-    "..#..........#..",
-    "..#..........#..",
-    "..#..........#..",
-    "..#..........#..",
-    "..#..........#..",
-    "..#..........#..",
-    "...#........#...",
-    "....########....",
-    "....##....##....",
-]
-WAVES = frozenset({(1, 4), (2, 3), (3, 4), (1, 11), (2, 12), (3, 11)})  # (row, column)
-ZED = frozenset({(0, 11), (0, 12), (0, 13), (1, 12), (2, 11), (2, 12), (2, 13)})
-# Each eye is 3 x 3, its top-left at row 7, columns 4 and 9.
-EYES = {
-    "open": ["...", ".##", ".##"],
-    "side": ["...", "..#", "..#"],  # looking for the sky
-    "happy": ["...", ".#.", "#.#"],  # ^ ^
-    "shut": ["...", "...", "###"],
-    "cross": ["#.#", ".#.", "#.#"],
+# The mascot: pwnagotchi's faces (pwnagotchi/ui/faces.py, by its name for
+# each), in its font, DejaVu Sans Mono Bold.
+FACES: dict[Mood, str] = {
+    "stoked": "(ᵔ◡◡ᵔ)",  # EXCITED
+    "searching": "( ⚆_⚆)",  # LOOK_R
+    "sleepy": "(⇀‿‿↼)",  # SLEEP
+    "uh oh": "(☓‿‿☓)",  # BROKEN
+    "low": "(≖__≖)",  # DEMOTIVATED
 }
-# The mouth is 6 x 2, its top-left at row 11, column 5.
-MOUTHS = {
-    "smile": ["#....#", ".####."],
-    "flat": ["......", ".####."],
-    "frown": [".####.", "#....#"],
-    "small": ["......", "..##.."],
-}
-
-
-class Face(NamedTuple):
-    eyes: str
-    mouth: str
-    extra: frozenset[tuple[int, int]] = frozenset()  # WAVES, ZED or nothing
-
-
-FACES: dict[Mood, Face] = {
-    "stoked": Face("happy", "smile", WAVES),
-    "searching": Face("side", "flat", WAVES),
-    "sleepy": Face("shut", "small", ZED),
-    "uh oh": Face("open", "frown"),
-    "low": Face("cross", "frown"),
-}
-SCALE = 4
-SPRITE_PX = len(BODY) * SCALE  # the mascot's side on the panel
-
-
-def sprite(face: Mood) -> list[str]:
-    """The mascot for a mood, as 16 rows of "#" (black) and "." (white)."""
-    eyes, mouth, extra = FACES[face]
-    grid = [list(row) for row in BODY]
-    for r, c in extra:
-        grid[r][c] = "#"
-    for col in (4, 9):
-        for r, row in enumerate(EYES[eyes]):
-            grid[7 + r][col : col + 3] = row
-    for r, row in enumerate(MOUTHS[mouth]):
-        grid[11 + r][5:11] = row
-    return ["".join(row) for row in grid]
-
-
-def sprite_image(face: Mood):
-    """The mascot as a 1-bit image, SPRITE_PX square."""
-    from PIL import Image
-
-    rows = sprite(face)
-    image = Image.new("1", (len(rows[0]), len(rows)), 255)
-    image.putdata([0 if px == "#" else 255 for row in rows for px in row])
-    return image.resize((SPRITE_PX, SPRITE_PX), Image.NEAREST)
+FACE_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
+FACE_SIZE = 19  # points: six monospaced characters, 69 px wide
+FACE_COLUMN = 70  # px on the right for the face and its mood
 
 
 def draw(lines: list[str], rotate: int = 0, face: Mood | None = None):
@@ -494,9 +426,9 @@ def draw(lines: list[str], rotate: int = 0, face: Mood | None = None):
     if lines and lines[0] not in ("OFF", "DISPLAY STOPPED"):
         pen.line((0, 24, WIDTH, 24), fill=0)
     if face:
-        left, top = WIDTH - SPRITE_PX - 2, 28
-        image.paste(sprite_image(face), (left, top))
-        pen.text((left + SPRITE_PX / 2, top + SPRITE_PX + 2), face, font=small, fill=0, anchor="ma")
+        middle = WIDTH - FACE_COLUMN / 2
+        pen.text((middle, 50), FACES[face], font=ImageFont.truetype(FACE_FONT, FACE_SIZE), fill=0, anchor="ma")
+        pen.text((middle, 82), face, font=small, fill=0, anchor="ma")
     return image.rotate(180) if rotate == 180 else image
 
 

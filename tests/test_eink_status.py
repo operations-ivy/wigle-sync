@@ -138,15 +138,9 @@ def test_mood(changes, face):
     assert eink.mood(driving(**changes)) == face
 
 
-@pytest.mark.parametrize("face", list(eink.FACES))
-def test_sprites_are_16_by_16(face):
-    rows = eink.sprite(face)
-    assert len(rows) == 16
-    assert all(len(row) == 16 and set(row) <= {"#", "."} for row in rows)
-
-
 def test_each_mood_has_its_own_face():
-    assert len({tuple(eink.sprite(face)) for face in eink.FACES}) == len(eink.FACES)
+    assert set(eink.FACES) == set(eink.Mood.__args__)
+    assert len(set(eink.FACES.values())) == len(eink.FACES)
 
 
 def test_last_sync(tmp_path):
@@ -286,7 +280,9 @@ def test_text_clears_the_mascot(status):
         pytest.skip("no DejaVu fonts")
     body, small = image_font.truetype(eink.FONT, eink.BODY_SIZE), image_font.truetype(eink.FONT, eink.SMALL_SIZE)
     lines = eink.screen_lines(status)
-    mascot_left = eink.WIDTH - eink.SPRITE_PX - 2
+    face_font = image_font.truetype(eink.FACE_FONT, eink.FACE_SIZE)
+    assert all(face_font.getlength(face) <= eink.FACE_COLUMN for face in eink.FACES.values())
+    mascot_left = eink.WIDTH - eink.FACE_COLUMN
     for line in lines[1:-1]:
         assert 4 + body.getlength(line) < mascot_left, line
     assert 4 + small.getlength(lines[-1]) < mascot_left
