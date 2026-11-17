@@ -181,8 +181,9 @@ if [[ $PROFILE == zero2w ]]; then
 fi
 if [[ ${PISUGAR:-0} == 1 ]]; then
     check "pisugar-watch running" systemctl is-active pisugar-watch.service
-    # Its metrics say whether pisugar-server answered it (the first poll is at start).
-    check "pisugar-server answers" sh -c 'for _ in 1 2 3 4 5 6 7 8 9 10; do grep -qx "pi_pisugar_up 1" /run/node-exporter-textfile/pisugar.prom 2>/dev/null && exit 0; sleep 1; done; exit 1'
+    # Its metrics say whether a battery reading came back (the first poll is at start):
+    # pisugar-server can answer while the board's I2C pins don't touch.
+    check "the PiSugar gives battery readings" sh -c 'for _ in 1 2 3 4 5 6 7 8 9 10; do grep -qx "pi_pisugar_up 1" /run/node-exporter-textfile/pisugar.prom 2>/dev/null && exit 0; sleep 1; done; exit 1'
 fi
 [[ ${EINK:-0} == 1 ]] && check "eink-status running" systemctl is-active eink-status.service
 check "gpsd sees a device" sh -c 'timeout 10 gpspipe -w -n 5 2>/dev/null | grep -q "\"class\":\"DEVICES\".*\"path\""'
