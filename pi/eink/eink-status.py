@@ -2,11 +2,13 @@
 """The wardriver's status on its e-ink display (a Waveshare 2.13", as on a
 pwnagotchi): what matters on the road, readable at a glance.
 
-    AWAY            GPS 3D 9 sat
-    Wi-Fi ok   BT ok
-    Heard 245 Wi-Fi  30 BT
+    AWAY  GPS 3D 9 sat
+    ------------------------------
+    BT ok   Wi-Fi ok
+    Heard 245 Wi-Fi  30 BT   (ᵔ◡◡ᵔ)
     Battery 78%
-    14:32
+    Sync 3h ago              stoked
+    14:32  2 to send
 
 - Home or away: on the home Wi-Fi or not (on-home-wifi, as pi-metrics uses).
 - GPS: gpsd's fix (none, 2D, 3D) and the satellites in it.
@@ -15,7 +17,18 @@ pwnagotchi): what matters on the road, readable at a glance.
 - Devices Kismet heard in the last minute, by Wi-Fi and Bluetooth, rounded
   so the screen doesn't change on every count.
 - The PiSugar's battery from pisugar-watch's state file ("+" while charging).
-- The time, with "?" until chrony has the real time.
+- The last sync: when wigle-sync last moved a session into uploaded/ (each
+  file's ctime there; the Pi is home, with the real time, when that happens),
+  "Nh ago" with the real time, the date and time without it.
+- The time, with "?" until chrony has the real time, and how many sessions
+  are waiting for wigle-sync (.wiglecsv files still in the capture directory).
+- A pwnagotchi face on the right that sums it up (mood): stoked (capturing with
+  a fix), searching (no fix), sleepy (home, Kismet stopped), uh oh (a source
+  down, or Kismet stopped away from home), low (battery at 20% or under,
+  not charging). Every screen has one: an error reading Kismet, gpsd or the
+  battery shows an ERROR screen with uh oh, and the last screen, left while
+  the Pi is off, sleeps, is low after a low-battery shutdown, or uh oh if the
+  display crashed.
 
 E-ink wears with refreshes and ghosts with partial ones, so the screen is
 redrawn only when its text changes, by partial refresh at most every
@@ -41,6 +54,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import field
 from datetime import datetime
@@ -56,6 +70,10 @@ Refresh = Literal["full", "partial"]
 CONFIG = Path(os.environ.get("HANDHELD_CONFIG", "/etc/wigle-pi/handheld.yaml"))
 STATE_DIR = Path(os.environ.get("WIGLE_PI_STATE", "/run/wigle-pi"))
 KISMET = "http://127.0.0.1:2501"
+# Where Kismet logs and wigle-sync collects (its PI_REMOTE_DIR, PI_ARCHIVE_DIR).
+CAPTURE_DIR = Path(os.environ.get("KISMET_LOG_DIR", "/var/log/kismet"))
+UPLOADED_DIR = CAPTURE_DIR / "uploaded"
+LOW_BATTERY = 20  # percent: the mascot looks low at or under this, not charging
 RECENT = 60  # seconds: "heard in the last minute", as pi-metrics counts it
 BATTERY_STALE = 180  # seconds: an older battery reading isn't shown
 MODELS = ("epd2in13_V2", "epd2in13_V3", "epd2in13_V4")
@@ -70,6 +88,7 @@ DEFAULTS = {
 WIDTH, HEIGHT = 250, 122  # the 2.13" panels, landscape
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+BOLD_SIZE, BODY_SIZE, SMALL_SIZE = 18, 14, 13  # points: the first line, the body, the last line
 
 
 @dataclass
@@ -84,6 +103,8 @@ class Status:
     recent: dict[str, int] | None = None  # wifi, bluetooth
     battery_percent: float | None = None
     charging: bool | None = None
+    last_sync: float | None = None  # epoch seconds
+    to_send: int = 0  # sessions waiting for wigle-sync
     clock_synced: bool = False
     now: datetime = field(default_factory=datetime.now)
 
@@ -105,13 +126,15 @@ def load_config(path: Path = CONFIG) -> dict:
     return config
 
 
-def rounded(n: int) -> int:
-    """Counts as shown: exact under 20, to 5 under 100, then to 10, so a
-    busy street doesn't redraw the screen on every poll."""
+def rounded(n: int) -> str:
+    """Counts as shown: exact under 20, to 5 under 100, to 10 under 1000,
+    then "1.2k", so a busy street doesn't redraw the screen on every poll."""
     if n < 20:
-        return n
+        return str(n)
+    if n >= 995:
+        return f"{n / 1000:.1f}k"
     step = 5 if n < 100 else 10
-    return round(n / step) * step
+    return str(round(n / step) * step)
 
 
 def source_state(src: dict) -> str:
@@ -135,6 +158,39 @@ def gps_text(mode: int, satellites: int) -> str:
     return "GPS ?"
 
 
+def ago(seconds: float) -> str:
+    """A coarse age that changes at most hourly: "<1h", "5h", "3d"."""
+    hours = max(0, int(seconds // 3600))
+    if hours < 1:
+        return "<1h"
+    return f"{hours}h" if hours < 48 else f"{hours // 24}d"
+
+
+def sync_text(last: float | None, now: datetime, clock_synced: bool) -> str:
+    """The last sync as shown: "Sync 3h ago", "Sync never". Without
+    the real time "ago" can't be trusted, so it's the sync's own date and time
+    (taken at home, with the real time)."""
+    if last is None:
+        return "Sync never"
+    if clock_synced:
+        return f"Sync {ago(now.timestamp() - last)} ago"
+    return "Sync " + datetime.fromtimestamp(last).strftime("%m-%d %H:%M")
+
+
+Mood = Literal["stoked", "searching", "sleepy", "uh oh", "low"]
+
+
+def mood(s: Status) -> Mood:
+    """The mascot's face, from the worst thing on the screen up."""
+    if s.battery_percent is not None and s.battery_percent <= LOW_BATTERY and not s.charging:
+        return "low"
+    if not s.kismet_up:
+        return "uh oh" if s.home is False else "sleepy"
+    if not s.sources or any(state != "ok" for state in s.sources.values()):
+        return "uh oh"
+    return "stoked" if s.gps_mode in (2, 3) else "searching"
+
+
 def screen_lines(s: Status) -> list[str]:
     """The screen's text, top to bottom: the first line is drawn bold, the
     last small. Pure, so the layout is tested without a panel."""
@@ -155,7 +211,10 @@ def screen_lines(s: Status) -> list[str]:
     else:
         battery = f"Battery {s.battery_percent:.0f}%" + (" +" if s.charging else "")
     clock = s.now.strftime("%H:%M") + ("" if s.clock_synced else " ?")
-    return [f"{where}  {gps}", sources, heard, battery, clock]
+    if s.to_send:
+        clock += f"  {s.to_send} to send"
+    sync = sync_text(s.last_sync, s.now, s.clock_synced)
+    return [f"{where}  {gps}", sources, heard, battery, sync, clock]
 
 
 def off_lines(reason: str | None, shutting_down: bool, now: datetime, clock_synced: bool) -> list[str]:
@@ -168,6 +227,31 @@ def off_lines(reason: str | None, shutting_down: bool, now: datetime, clock_sync
     if shutting_down:
         return ["OFF", "shut down", at, "", "wigle-sync"]
     return ["DISPLAY STOPPED", "the Pi may still be on", at, "", "wigle-sync"]
+
+
+def off_mood(reason: str | None, crashed: bool) -> Mood:
+    """The face left on the last screen. `reason` is pisugar-watch's, only
+    ever a low battery."""
+    if crashed:
+        return "uh oh"
+    return "low" if reason else "sleepy"
+
+
+def error_lines(error: Exception, now: datetime, clock_synced: bool) -> list[str]:
+    """The screen while a look at Kismet, gpsd or the battery fails."""
+    at = now.strftime("%H:%M") + ("" if clock_synced else " ?")
+    return ["ERROR", type(error).__name__[:20], "see its journal", "", at]
+
+
+def status_screen(get_status: Callable[[], Status], log) -> tuple[list[str], Mood]:
+    """The lines and the face for this poll: an ERROR screen (uh oh) when
+    collecting fails, so the mascot stays and the loop keeps going."""
+    try:
+        status = get_status()
+    except Exception as e:  # anything: the display must outlive it
+        log.exception("collect failed")
+        return error_lines(e, datetime.now(), chrony_synced()), "uh oh"
+    return screen_lines(status), mood(status)
 
 
 @dataclass
@@ -271,6 +355,23 @@ def battery(path: Path, now: float) -> tuple[float | None, bool | None]:
     return state.get("percent"), state.get("charging")
 
 
+def last_sync(uploaded: Path) -> float | None:
+    """When wigle-sync last moved a file into uploaded/: the newest ctime there
+    (a rename sets it; pruning old sessions doesn't touch the rest)."""
+    try:
+        return max((f.stat().st_ctime for f in uploaded.iterdir() if f.is_file()), default=None)
+    except OSError:
+        return None
+
+
+def to_send(capture: Path) -> int:
+    """Sessions still waiting for wigle-sync, the one being written included."""
+    try:
+        return sum(1 for _ in capture.glob("*.wiglecsv"))
+    except OSError:
+        return 0
+
+
 def run_ok(*cmd: str) -> bool | None:
     try:
         return subprocess.run(cmd, capture_output=True, timeout=5).returncode == 0
@@ -313,27 +414,49 @@ def collect(login: tuple[str, str] | None) -> Status:
         recent=recent,
         battery_percent=percent,
         charging=charging,
+        last_sync=last_sync(UPLOADED_DIR),
+        to_send=to_send(CAPTURE_DIR),
         clock_synced=chrony_synced(),
         now=datetime.now(),
     )
 
 
-def draw(lines: list[str], rotate: int = 0):
-    """The lines as a 1-bit landscape image for the panel."""
+# The mascot: pwnagotchi's faces (pwnagotchi/ui/faces.py, by its name for
+# each), in its font, DejaVu Sans Mono Bold.
+FACES: dict[Mood, str] = {
+    "stoked": "(ᵔ◡◡ᵔ)",  # EXCITED
+    "searching": "( ⚆_⚆)",  # LOOK_R
+    "sleepy": "(⇀‿‿↼)",  # SLEEP
+    "uh oh": "(☓‿‿☓)",  # BROKEN
+    "low": "(≖__≖)",  # DEMOTIVATED
+}
+FACE_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
+FACE_SIZE = 19  # points: six monospaced characters, 69 px wide
+FACE_COLUMN = 70  # px on the right for the face and its mood
+
+
+def draw(lines: list[str], face: Mood, rotate: int = 0):
+    """The lines as a 1-bit landscape image for the panel: the first line
+    bold over a rule, the last small, and the mascot on the right with its
+    mood under it. Every screen has the mascot."""
     from PIL import Image
     from PIL import ImageDraw
     from PIL import ImageFont
 
     image = Image.new("1", (WIDTH, HEIGHT), 255)
     pen = ImageDraw.Draw(image)
-    bold, body, small = ImageFont.truetype(FONT_BOLD, 18), ImageFont.truetype(FONT, 16), ImageFont.truetype(FONT, 13)
+    bold = ImageFont.truetype(FONT_BOLD, BOLD_SIZE)
+    body, small = ImageFont.truetype(FONT, BODY_SIZE), ImageFont.truetype(FONT, SMALL_SIZE)
     y = 2
     for i, line in enumerate(lines):
         font = bold if i == 0 else small if i == len(lines) - 1 else body
         pen.text((4, y), line, font=font, fill=0)
-        y += 24 if i == 0 else 21
-    if lines and lines[0] not in ("OFF", "DISPLAY STOPPED"):
+        y += 26 if i == 0 else 19
+    if lines and lines[0] not in ("OFF", "DISPLAY STOPPED", "ERROR"):
         pen.line((0, 24, WIDTH, 24), fill=0)
+    middle = WIDTH - FACE_COLUMN / 2
+    pen.text((middle, 50), FACES[face], font=ImageFont.truetype(FACE_FONT, FACE_SIZE), fill=0, anchor="ma")
+    pen.text((middle, 82), face, font=small, fill=0, anchor="ma")
     return image.rotate(180) if rotate == 180 else image
 
 
@@ -371,28 +494,33 @@ def main() -> None:
     creds = Path(os.environ.get("CREDENTIALS_DIRECTORY", "/nonexistent")) / "kismet-httpd"
     stop = stop_on_sigterm()
     log.info("started", model=config["model"], min_interval=config["min_interval"], full_every=config["full_every"])
+    crashed = False
     try:
         while not stop.is_set():
-            status = collect(credentials(creds))
-            lines = screen_lines(status)
+            lines, face = status_screen(lambda: collect(credentials(creds)), log)
+            shown = [*lines, face]  # what a redraw compares
             now = time.monotonic()
-            kind = policy.decide(lines, now)
+            kind = policy.decide(shown, now)
             if kind:
-                image = draw(lines, config["rotate"])
+                image = draw(lines, face, config["rotate"])
                 if kind == "full":
                     panel.full(image)
                 else:
                     panel.partial(image)
-                policy.done(lines, kind, now)
+                policy.done(shown, kind, now)
             stop.wait(config["poll"])
+    except BaseException:
+        crashed = True
+        raise
     finally:
         try:
             reason = (STATE_DIR / "shutdown-reason").read_text().strip()
         except OSError:
             reason = None
-        panel.full(draw(off_lines(reason, shutting_down(), datetime.now(), chrony_synced()), config["rotate"]))
+        last = off_lines(reason, shutting_down(), datetime.now(), chrony_synced())
+        panel.full(draw(last, off_mood(reason, crashed), config["rotate"]))
         panel.sleep()
-        log.info("stopped", reason=reason)
+        log.info("stopped", reason=reason, crashed=crashed)
 
 
 if __name__ == "__main__":
