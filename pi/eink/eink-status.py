@@ -16,7 +16,9 @@ pwnagotchi): what matters on the road, readable at a glance.
   (at home it stops 15 minutes after joining the Wi-Fi).
 - Devices Kismet heard in the last minute, by Wi-Fi and Bluetooth, rounded
   so the screen doesn't change on every count.
-- The PiSugar's battery from pisugar-watch's state file ("+" while charging).
+- The PiSugar's battery from pisugar-watch's state file ("+" while charging),
+  left out while there's no reading (a board that isn't on I2C, as on
+  scootypuffsr until it's re-seated), so it comes back by itself.
 - The last sync: when wigle-sync last moved a session into uploaded/ (each
   file's ctime there; the Pi is home, with the real time, when that happens),
   "Nh ago" with the real time, the date and time without it.
@@ -206,15 +208,14 @@ def screen_lines(s: Status) -> list[str]:
         heard = "Heard -"
     else:
         heard = f"Heard {rounded(s.recent.get('wifi', 0))} Wi-Fi  {rounded(s.recent.get('bluetooth', 0))} BT"
-    if s.battery_percent is None:
-        battery = "Battery ?"
-    else:
-        battery = f"Battery {s.battery_percent:.0f}%" + (" +" if s.charging else "")
     clock = s.now.strftime("%H:%M") + ("" if s.clock_synced else " ?")
     if s.to_send:
         clock += f"  {s.to_send} to send"
     sync = sync_text(s.last_sync, s.now, s.clock_synced)
-    return [f"{where}  {gps}", sources, heard, battery, sync, clock]
+    lines = [f"{where}  {gps}", sources, heard]
+    if s.battery_percent is not None:  # left out without a reading
+        lines.append(f"Battery {s.battery_percent:.0f}%" + (" +" if s.charging else ""))
+    return [*lines, sync, clock]
 
 
 def off_lines(reason: str | None, shutting_down: bool, now: datetime, clock_synced: bool) -> list[str]:
