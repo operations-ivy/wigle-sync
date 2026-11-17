@@ -71,6 +71,7 @@ from typing import Literal
 
 from eink_art import BORDER
 from eink_art import circuit_border
+from eink_art import COLUMN
 from eink_art import draw_robot
 from eink_art import Emotion
 from eink_art import label
@@ -164,7 +165,7 @@ def source_state(src: dict) -> str:
 
 def source_label(name: str) -> str:
     """Kismet's source names (kismet_site.conf: wlan_mon0, usb_bt) as shown."""
-    return "BT" if "bt" in name.lower() or name.startswith("hci") else "wifi"
+    return "bt" if "bt" in name.lower() or name.startswith("hci") else "wifi"
 
 
 def gps_text(mode: int, satellites: int) -> str:
@@ -195,26 +196,32 @@ def sync_text(last: float | None, now: datetime, clock_synced: bool) -> str:
     return "sync " + datetime.fromtimestamp(last).strftime("%m-%d %H:%M")
 
 
+# Emotions that take turns: five minutes each for the pairs, two for each
+# upload step, so the panel isn't redrawn every poll for them.
+LOOKING: tuple[Emotion, Emotion] = ("look_l", "look_r")
+SLEEPING: tuple[Emotion, Emotion] = ("sleep", "sleep2")
+UPLOADING: tuple[Emotion, Emotion, Emotion] = ("upload", "upload1", "upload2")
+
+
 def emotion(s: Status) -> Emotion:
-    """The robot's emotion, from the worst thing on the screen up. Two pairs
-    take turns, five minutes each (so the panel isn't redrawn every poll for
-    them): looking left and right while it waits for a fix, and sleep and
-    sleep2 at home; the upload arrows step every two minutes."""
-    turn = s.now.minute // 5 % 2
+    """The robot's emotion, from the worst thing on the screen up: looking
+    left and right while it waits for a fix, sleep and sleep2 at home, the
+    upload arrows stepping while sessions wait to go."""
+    turn = s.now.minute // 5 % 2  # which of a pair, for five minutes
     if s.battery_percent is not None and s.battery_percent <= LOW_BATTERY and not s.charging:
         return "demotivated"
     if not s.kismet_up:
         if s.home is False:
             return "sad"
         if s.home and s.to_send:
-            return ("upload", "upload1", "upload2")[s.now.minute // 2 % 3]
-        return ("sleep", "sleep2")[turn]
+            return UPLOADING[s.now.minute // 2 % len(UPLOADING)]
+        return SLEEPING[turn]
     if not s.sources or any(state != "ok" for state in s.sources.values()):
         return "broken"
     if s.gps_mode in (2, 3):
         heard = sum((s.recent or {}).values())
         return "excited" if heard >= EXCITED else "cool"
-    return ("look_l", "look_r")[turn]
+    return LOOKING[turn]
 
 
 def screen_lines(s: Status) -> list[str]:
@@ -446,7 +453,9 @@ def collect(login: tuple[str, str] | None) -> Status:
     )
 
 
-FACE_COLUMN = 70  # px on the right for the robot and its label
+FACE_COLUMN = COLUMN  # px on the right for the robot and its label
+TITLE_BAR = 15  # px: the inverted title bar's height
+ROW = 15  # px between shell lines, when they fit (less with a battery line)
 
 
 def draw(lines: list[str], face: Emotion, rotate: int = 0):
@@ -463,18 +472,18 @@ def draw(lines: list[str], face: Emotion, rotate: int = 0):
     circuit_border(pen, WIDTH, HEIGHT)
     title, body = ImageFont.truetype(FONT_BOLD, TITLE_SIZE), ImageFont.truetype(FONT, BODY_SIZE)
     left, right, top, bottom = BORDER + 1, WIDTH - 2 - BORDER, BORDER + 1, HEIGHT - 2 - BORDER
-    pen.rectangle((left, top, right, top + 14), fill=0)
+    pen.rectangle((left, top, right, top + TITLE_BAR - 1), fill=0)
     if lines:
         pen.text((left + 3, top + 1), lines[0], font=title, fill=255)
-    rows = lines[1:]
-    step = min(15, (bottom - top - 18) // max(1, len(rows)))
+    rows, below = lines[1:], top + TITLE_BAR + 3  # the shell lines start under the bar
+    step = min(ROW, (bottom - below) // max(1, len(rows)))
     for i, line in enumerate(rows):
-        pen.text((left + 5, top + 18 + i * step), line, font=body, fill=0)
+        pen.text((left + 5, below + i * step), line, font=body, fill=0)
     divider = right - FACE_COLUMN
-    pen.line((divider, top + 18, divider, bottom - 1), fill=0)
+    pen.line((divider, below, divider, bottom - 1), fill=0)
     middle = (divider + right) // 2 + 1
-    draw_robot(pen, face, middle, top + 19)
-    pen.text((middle, bottom - 13), label(face), font=body, fill=0, anchor="ma")
+    draw_robot(pen, face, middle, below + 1)
+    pen.text((middle, bottom - BODY_SIZE - 1), label(face), font=body, fill=0, anchor="ma")
     return image.rotate(180) if rotate == 180 else image
 
 
@@ -516,8 +525,10 @@ def main() -> None:
     try:
         while not stop.is_set():
             lines, face = status_screen(lambda: collect(credentials(creds)), log)
+            # The robot wakes up with the display: the first good screen is
+            # awake (an ERROR screen keeps its debug, and the next one wakes).
             if first and face != "debug":
-                face, first = "awake", False  # the robot wakes up with the display
+                face, first = "awake", False
             shown = [*lines, face]  # what a redraw compares
             now = time.monotonic()
             kind = policy.decide(shown, now)

@@ -5,18 +5,24 @@ Pure drawing on a PIL ImageDraw, so it's tested without a panel."""
 
 from __future__ import annotations
 
+from typing import get_args
 from typing import Literal
+from typing import NamedTuple
+from typing import TYPE_CHECKING
 
-BORDER = 10  # px: the circuit border's band round the edge
+if TYPE_CHECKING:
+    from PIL.ImageDraw import ImageDraw
+
+BORDER = 11  # px: the circuit border's band round the edge (its inner pads reach 10 px in)
 CHIP = 11  # px: the chip in each corner
 
 
-def _via(pen, x: int, y: int) -> None:
+def _via(pen: ImageDraw, x: int, y: int) -> None:
     pen.ellipse((x - 2, y - 2, x + 2, y + 2), fill=0)
     pen.point((x, y), fill=255)
 
 
-def _pad(pen, x: int, y: int) -> None:
+def _pad(pen: ImageDraw, x: int, y: int) -> None:
     pen.rectangle((x - 1, y - 1, x + 1, y + 1), fill=0)
 
 
@@ -35,7 +41,7 @@ def _side_runs(length: int) -> list[tuple[int, int, int]]:
     return runs
 
 
-def circuit_border(pen, width: int, height: int) -> None:
+def circuit_border(pen: ImageDraw, width: int, height: int) -> None:
     """A circuit-board border in the outer BORDER px: an edge trace, two lanes
     of short traces with vias and pads, and a chip in each corner, its pin-1
     notch turned to its corner."""
@@ -62,10 +68,8 @@ def circuit_border(pen, width: int, height: int) -> None:
         "bottom left": lambda x, y: (x, height - 1 - y),
     }
     for at in corners.values():
-        body = [at(2, 2), at(8, 8)]
-        pen.rectangle(
-            (min(p[0] for p in body), min(p[1] for p in body), max(p[0] for p in body), max(p[1] for p in body)), fill=0
-        )
+        xs, ys = zip(at(2, 2), at(8, 8))  # the body, whichever way the corner mirrors it
+        pen.rectangle((min(xs), min(ys), max(xs), max(ys)), fill=0)
         pen.point(at(3, 3), fill=255)  # pin 1, towards the corner
         for k in (3, 5, 7):  # pins on its two inner sides, out to the edge traces
             pen.line([at(9, k), at(CHIP, k)], fill=0)
@@ -77,247 +81,196 @@ def circuit_border(pen, width: int, height: int) -> None:
 GRID_W, GRID_H = 22, 20  # the robot's grid, in its own pixels
 
 Emotion = Literal[
-    "look_r",
-    "look_l",
-    "look_r_happy",
-    "look_l_happy",
-    "sleep",
-    "sleep2",
-    "awake",
-    "bored",
-    "intense",
-    "cool",
-    "happy",
-    "excited",
-    "grateful",
-    "motivated",
-    "demotivated",
-    "smart",
-    "lonely",
-    "sad",
-    "angry",
-    "friend",
-    "broken",
-    "debug",
-    "upload",
-    "upload1",
-    "upload2",
-]
+    "look_r", "look_l", "look_r_happy", "look_l_happy", "sleep", "sleep2", "awake", "bored",
+    "intense", "cool", "happy", "excited", "grateful", "motivated", "demotivated", "smart",
+    "lonely", "sad", "angry", "friend", "broken", "debug", "upload", "upload1", "upload2",
+]  # fmt: skip
+EMOTIONS: tuple[Emotion, ...] = get_args(Emotion)
 
-EMOTIONS: tuple[Emotion, ...] = (
-    "look_r",
-    "look_l",
-    "look_r_happy",
-    "look_l_happy",
-    "sleep",
-    "sleep2",
-    "awake",
-    "bored",
-    "intense",
-    "cool",
-    "happy",
-    "excited",
-    "grateful",
-    "motivated",
-    "demotivated",
-    "smart",
-    "lonely",
-    "sad",
-    "angry",
-    "friend",
-    "broken",
-    "debug",
-    "upload",
-    "upload1",
-    "upload2",
+Pixel = tuple[int, int]
+
+
+class Layer(NamedTuple):
+    """One part of the robot: its black pixels, and white ones it punches
+    through whatever else is drawn (glints, cracks, teeth)."""
+
+    on: frozenset[Pixel]
+    off: frozenset[Pixel] = frozenset()
+
+
+def _rect(x0: int, y0: int, x1: int, y1: int) -> frozenset[Pixel]:
+    return frozenset((x, y) for x in range(x0, x1 + 1) for y in range(y0, y1 + 1))
+
+
+def _pts(*pixels: Pixel) -> frozenset[Pixel]:
+    return frozenset(pixels)
+
+
+# A rounded square outline, with bolts on its sides.
+HEAD = Layer(
+    frozenset((x, y) for x in range(4, 18) for y in (4, 17))
+    | frozenset((x, y) for x in (2, 19) for y in range(6, 16))
+    | _pts((3, 5), (18, 5), (3, 16), (18, 16))
+    | _rect(0, 9, 1, 11)
+    | _rect(20, 9, 21, 11)
 )
 
-# Each emotion: (antenna, shades, eyes, mouth, extra)
-PARTS = {
-    "look_r": ("up", "low", "right", "flat", None),
-    "look_l": ("up", "low", "left", "flat", None),
-    "look_r_happy": ("up", "low", "right", "smile", None),
-    "look_l_happy": ("up", "low", "left", "smile", None),
-    "sleep": ("droop", "on", None, "flat", "zz"),
-    "sleep2": ("droop", "on", None, "o_small", "zzz"),
-    "awake": ("up", "forehead", "open", "o", None),
-    "bored": ("droop", "on", None, "flat", "dots"),
-    "intense": ("up", "forehead", "narrow", "flat", "sweat"),
-    "cool": ("up", "on", None, "smirk", "glint"),
-    "happy": ("up", "on", None, "smile", None),
-    "excited": ("spark", "on", None, "grin", "sparkles"),
-    "grateful": ("up", "on", None, "smile", "heart"),
-    "motivated": ("spark", "on", None, "grin", "bang"),
-    "demotivated": ("droop", "low", "half", "frown", None),
-    "smart": ("up", "on", None, "smirk", "bulb"),
-    "lonely": ("droop", "on", None, "flat", "question"),
-    "sad": ("droop", "low", "half", "frown", "tear"),
-    "angry": ("spark", "angry", None, "zigzag", "steam"),
-    "friend": ("up", "hearts", None, "smile", None),
-    "broken": ("bent", "cracked", None, "zigzag", None),
-    "debug": ("up", "forehead", "open", "flat", "bug"),
-    "upload": ("spark", "on", None, "o_small", "arrow1"),
-    "upload1": ("spark", "on", None, "o_small", "arrow2"),
-    "upload2": ("spark", "on", None, "o_small", "arrow3"),
+_UP = _pts((10, 3), (10, 2)) | _rect(9, 0, 11, 1)
+ANTENNAS = {
+    "up": Layer(_UP),
+    "spark": Layer(_UP | _pts((7, 0), (13, 0), (7, 2), (13, 2))),
+    "droop": Layer(_pts((10, 3), (11, 2), (12, 2), (13, 3)) | _rect(13, 3, 14, 3)),
+    "bent": Layer(_pts((10, 3), (9, 2), (8, 1)) | _rect(6, 0, 7, 1)),
 }
 
 
-def robot(emotion: Emotion) -> set[tuple[int, int]]:
-    """The black pixels of the robot for an emotion, as (x, y) on its grid."""
-    antenna, shades, eyes, mouth, extra = PARTS[emotion]
-    on: set[tuple[int, int]] = set()
-    off: set[tuple[int, int]] = set()  # white pixels drawn over black (glints, cracks)
+def _eyes(kind: str | None, shades_low: bool) -> Layer:
+    """The eyes, where the shades don't cover them: above shades slid down
+    the nose (a row higher), or under shades pushed up."""
+    y = 8 if shades_low else 9
+    eyes = {
+        "right": _rect(7, y, 8, y) | _rect(15, y, 16, y),
+        "left": _rect(5, y, 6, y) | _rect(13, y, 14, y),
+        "half": _rect(5, y, 8, y) | _rect(13, y, 16, y),
+        "open": _rect(6, 10, 7, 11) | _rect(14, 10, 15, 11),
+        "narrow": _rect(5, 10, 8, 10) | _rect(13, 10, 16, 10),
+    }
+    return Layer(eyes.get(kind, frozenset()))
 
-    def rect(x0, y0, x1, y1):
-        on.update((x, y) for x in range(x0, x1 + 1) for y in range(y0, y1 + 1))
 
-    def px(*pts):
-        on.update(pts)
+def _lenses(y: int, glint: bool = True) -> Layer:
+    """Two lenses with rounded bottoms, a bridge and the arms, top row at y."""
+    on = _rect(4, y, 9, y + 2) | _rect(12, y, 17, y + 2) | _rect(10, y, 11, y) | _pts((3, y), (18, y))
+    off = _pts((4, y + 2), (9, y + 2), (12, y + 2), (17, y + 2)) | (_pts((5, y), (13, y)) if glint else frozenset())
+    return Layer(on, off)
 
-    # head: a rounded square outline, bolts on the sides
-    for x in range(4, 18):
-        px((x, 4), (x, 17))
-    for y in range(6, 16):
-        px((2, y), (19, y))
-    px((3, 5), (18, 5), (3, 16), (18, 16))
-    rect(0, 9, 1, 11)
-    rect(20, 9, 21, 11)
-    # antenna
-    if antenna == "droop":
-        px((10, 3), (11, 2), (12, 2), (13, 3))
-        rect(13, 3, 14, 3)
-    elif antenna == "bent":
-        px((10, 3), (9, 2), (8, 1))
-        rect(6, 0, 7, 1)
-    else:
-        px((10, 3), (10, 2))
-        rect(9, 0, 11, 1)
-        if antenna == "spark":
-            px((7, 0), (13, 0), (7, 2), (13, 2))
-    # eyes (shown when the shades aren't over them)
-    eye_y = 9
-    if shades == "low":
-        eye_y = 8
-    if eyes == "right":
-        rect(7, eye_y, 8, eye_y)
-        rect(15, eye_y, 16, eye_y)
-    elif eyes == "left":
-        rect(5, eye_y, 6, eye_y)
-        rect(13, eye_y, 14, eye_y)
-    elif eyes == "open":
-        rect(6, 10, 7, 11)
-        rect(14, 10, 15, 11)
-    elif eyes == "narrow":
-        rect(5, 10, 8, 10)
-        rect(13, 10, 16, 10)
-    elif eyes == "half":
-        rect(5, eye_y, 8, eye_y)
-        rect(13, eye_y, 16, eye_y)
 
-    # shades
-    def lenses(y, glint=True):
-        rect(4, y, 9, y + 2)
-        rect(12, y, 17, y + 2)
-        rect(10, y, 11, y)  # bridge
-        off.update({(4, y + 2), (9, y + 2), (12, y + 2), (17, y + 2)})  # rounded bottoms
-        rect(3, y, 3, y)
-        rect(18, y, 18, y)  # arms
-        if glint:
-            off.update({(5, y), (13, y)})
+SHADES = {
+    "on": _lenses(8),
+    "low": _lenses(10, glint=False),  # slid down the nose
+    "forehead": _lenses(5, glint=False),  # pushed up
+    "angry": Layer(  # slanted down to the middle
+        _rect(4, 8, 9, 10) | _rect(12, 8, 17, 10) | _rect(10, 9, 11, 9),
+        _pts((4, 8), (5, 8), (16, 8), (17, 8), (4, 9), (17, 9)),
+    ),
+    "cracked": Layer(
+        _lenses(8, glint=False).on,
+        _lenses(8, glint=False).off | _pts((5, 8), (6, 9), (7, 10), (14, 8), (15, 9), (14, 10)),
+    ),
+    "hearts": Layer(
+        frozenset().union(
+            *(
+                _pts((cx - 2, 8), (cx - 1, 8), (cx + 1, 8), (cx + 2, 8), (cx, 11))
+                | _rect(cx - 2, 9, cx + 2, 9)
+                | _rect(cx - 1, 10, cx + 1, 10)
+                for cx in (6, 14)
+            )
+        )
+        | _rect(9, 9, 11, 9)
+    ),
+}
 
-    if shades == "on":
-        lenses(8)
-        if extra == "glint":
-            off.update({(6, 9), (14, 9)})
-    elif shades == "low":
-        lenses(10, glint=False)
-    elif shades == "forehead":
-        lenses(5, glint=False)
-    elif shades == "angry":
-        rect(4, 8, 9, 10)
-        rect(12, 8, 17, 10)
-        off.update({(4, 8), (5, 8), (16, 8), (17, 8), (4, 9)})  # slanted down to the middle
-        off.update({(17, 9)})
-        rect(10, 9, 11, 9)
-    elif shades == "cracked":
-        lenses(8, glint=False)
-        off.update({(5, 8), (6, 9), (7, 10), (14, 8), (15, 9), (14, 10)})
-    elif shades == "hearts":
-        for cx in (6, 14):
-            px((cx - 2, 8), (cx - 1, 8), (cx + 1, 8), (cx + 2, 8))
-            rect(cx - 2, 9, cx + 2, 9)
-            rect(cx - 1, 10, cx + 1, 10)
-            px((cx, 11))
-        rect(9, 9, 11, 9)
-    # mouth
-    if mouth == "smile":
-        px((7, 13), (14, 13))
-        rect(8, 14, 13, 14)
-    elif mouth == "grin":
-        rect(7, 13, 14, 13)
-        rect(8, 14, 13, 15)
-        off.update({(9, 14), (10, 14), (11, 14), (12, 14)})
-    elif mouth == "smirk":
-        rect(8, 14, 12, 14)
-        px((13, 13))
-    elif mouth == "flat":
-        rect(8, 14, 13, 14)
-    elif mouth == "frown":
-        rect(8, 13, 13, 13)
-        px((7, 14), (14, 14))
-    elif mouth == "o":
-        rect(9, 13, 12, 15)
-        off.update({(10, 14), (11, 14)})
-    elif mouth == "o_small":
-        rect(10, 13, 11, 14)
-    elif mouth == "zigzag":
-        px((7, 14), (8, 13), (9, 14), (10, 13), (11, 14), (12, 13), (13, 14), (14, 13))
-    # extras, in the corners round the head
-    if extra == "zz":
-        px((15, 0), (16, 0), (17, 0), (16, 1), (15, 2), (16, 2), (17, 2))
-    elif extra == "zzz":
-        px((15, 1), (16, 1), (15, 2), (15, 3), (16, 3))
-        px((18, 0), (19, 0), (20, 0), (19, 1), (18, 2), (19, 2), (20, 2))
-    elif extra == "dots":
-        px((14, 14), (16, 14))
-    elif extra == "sweat":
-        px((20, 5), (20, 6), (21, 6))
-    elif extra == "sparkles":
-        px((2, 1), (1, 2), (3, 2), (2, 3), (19, 1), (18, 2), (20, 2), (19, 3))
-    elif extra == "heart":
-        px((17, 0), (19, 0), (16, 1), (17, 1), (18, 1), (19, 1), (20, 1), (17, 2), (18, 2), (19, 2), (18, 3))
-    elif extra == "bang":
-        px((19, 0), (19, 1), (19, 3))
-    elif extra == "bulb":
-        rect(17, 0, 19, 2)
-        px((18, 3))
-        off.add((18, 1))
-    elif extra == "question":
-        px((17, 0), (18, 0), (19, 1), (18, 2), (18, 3))
-    elif extra == "tear":
-        px((16, 13), (15, 14), (16, 14), (17, 14), (16, 15))
-    elif extra == "steam":
-        px((1, 1), (2, 2), (1, 3), (20, 1), (19, 2), (20, 3))
-    elif extra == "bug":
-        rect(17, 1, 19, 3)
-        px((16, 0), (20, 0), (16, 2), (20, 2))
-    elif extra in ("arrow1", "arrow2", "arrow3"):
-        for x in ((18,), (2, 18), (2, 6, 18))[int(extra[-1]) - 1]:  # one more arrow per step
-            px((x, 0), (x - 1, 1), (x, 1), (x + 1, 1), (x, 2), (x, 3))
+MOUTHS = {
+    "smile": Layer(_pts((7, 13), (14, 13)) | _rect(8, 14, 13, 14)),
+    "grin": Layer(_rect(7, 13, 14, 13) | _rect(8, 14, 13, 15), _rect(9, 14, 12, 14)),
+    "smirk": Layer(_rect(8, 14, 12, 14) | _pts((13, 13))),
+    "flat": Layer(_rect(8, 14, 13, 14)),
+    "frown": Layer(_rect(8, 13, 13, 13) | _pts((7, 14), (14, 14))),
+    "o": Layer(_rect(9, 13, 12, 15), _pts((10, 14), (11, 14))),
+    "o_small": Layer(_rect(10, 13, 11, 14)),
+    "zigzag": Layer(_pts((7, 14), (8, 13), (9, 14), (10, 13), (11, 14), (12, 13), (13, 14), (14, 13))),
+}
+
+
+def _arrows(*xs: int) -> Layer:
+    return Layer(frozenset().union(*(_pts((x, 0), (x - 1, 1), (x, 1), (x + 1, 1), (x, 2), (x, 3)) for x in xs)))
+
+
+# Extras round the head (and the glint, which only marks the shades).
+EXTRAS = {
+    "glint": Layer(frozenset(), _pts((6, 9), (14, 9))),
+    "zz": Layer(_pts((15, 0), (16, 0), (17, 0), (16, 1), (15, 2), (16, 2), (17, 2))),
+    "zzz": Layer(
+        _pts((15, 1), (16, 1), (15, 2), (15, 3), (16, 3), (18, 0), (19, 0), (20, 0), (19, 1), (18, 2), (19, 2), (20, 2))
+    ),
+    "dots": Layer(_pts((14, 14), (16, 14))),
+    "sweat": Layer(_pts((20, 5), (20, 6), (21, 6))),
+    "sparkles": Layer(_pts((2, 1), (1, 2), (3, 2), (2, 3), (19, 1), (18, 2), (20, 2), (19, 3))),
+    "heart": Layer(_pts((17, 0), (19, 0), (18, 3)) | _rect(16, 1, 20, 1) | _rect(17, 2, 19, 2)),
+    "bang": Layer(_pts((19, 0), (19, 1), (19, 3))),
+    "bulb": Layer(_rect(17, 0, 19, 2) | _pts((18, 3)), _pts((18, 1))),
+    "question": Layer(_pts((17, 0), (18, 0), (19, 1), (18, 2), (18, 3))),
+    "tear": Layer(_pts((16, 13), (15, 14), (16, 14), (17, 14), (16, 15))),
+    "steam": Layer(_pts((1, 1), (2, 2), (1, 3), (20, 1), (19, 2), (20, 3))),
+    "bug": Layer(_rect(17, 1, 19, 3) | _pts((16, 0), (20, 0), (16, 2), (20, 2))),
+    "arrow1": _arrows(18),  # one more arrow each upload step
+    "arrow2": _arrows(2, 18),
+    "arrow3": _arrows(2, 6, 18),
+}
+
+
+class Parts(NamedTuple):
+    antenna: str
+    shades: str
+    eyes: str | None
+    mouth: str
+    extra: str | None = None
+
+
+PARTS: dict[Emotion, Parts] = {
+    "look_r": Parts("up", "low", "right", "flat"),
+    "look_l": Parts("up", "low", "left", "flat"),
+    "look_r_happy": Parts("up", "low", "right", "smile"),
+    "look_l_happy": Parts("up", "low", "left", "smile"),
+    "sleep": Parts("droop", "on", None, "flat", "zz"),
+    "sleep2": Parts("droop", "on", None, "o_small", "zzz"),
+    "awake": Parts("up", "forehead", "open", "o"),
+    "bored": Parts("droop", "on", None, "flat", "dots"),
+    "intense": Parts("up", "forehead", "narrow", "flat", "sweat"),
+    "cool": Parts("up", "on", None, "smirk", "glint"),
+    "happy": Parts("up", "on", None, "smile"),
+    "excited": Parts("spark", "on", None, "grin", "sparkles"),
+    "grateful": Parts("up", "on", None, "smile", "heart"),
+    "motivated": Parts("spark", "on", None, "grin", "bang"),
+    "demotivated": Parts("droop", "low", "half", "frown"),
+    "smart": Parts("up", "on", None, "smirk", "bulb"),
+    "lonely": Parts("droop", "on", None, "flat", "question"),
+    "sad": Parts("droop", "low", "half", "frown", "tear"),
+    "angry": Parts("spark", "angry", None, "zigzag", "steam"),
+    "friend": Parts("up", "hearts", None, "smile"),
+    "broken": Parts("bent", "cracked", None, "zigzag"),
+    "debug": Parts("up", "forehead", "open", "flat", "bug"),
+    "upload": Parts("spark", "on", None, "o_small", "arrow1"),
+    "upload1": Parts("spark", "on", None, "o_small", "arrow2"),
+    "upload2": Parts("spark", "on", None, "o_small", "arrow3"),
+}
+
+
+def robot(emotion: Emotion) -> frozenset[Pixel]:
+    """The black pixels of the robot for an emotion, as (x, y) on its grid:
+    every part's black, less every part's white."""
+    p = PARTS[emotion]
+    layers = [HEAD, ANTENNAS[p.antenna], _eyes(p.eyes, p.shades == "low"), SHADES[p.shades], MOUTHS[p.mouth]]
+    if p.extra:
+        layers.append(EXTRAS[p.extra])
+    on = frozenset().union(*(layer.on for layer in layers))
+    off = frozenset().union(*(layer.off for layer in layers))
     return on - off
 
 
-def draw_robot(pen, emotion: Emotion, centre_x: int, top: int, scale: int = 3) -> None:
+def draw_robot(pen: ImageDraw, emotion: Emotion, centre_x: int, top: int, scale: int = 3) -> None:
     """The robot for an emotion, each of its pixels a scale x scale square."""
     left = centre_x - GRID_W * scale // 2
     for x, y in robot(emotion):
         pen.rectangle(
-            (left + x * scale, top + y * scale, left + x * scale + scale - 1, top + y * scale + scale - 1), fill=0
+            (left + x * scale, top + y * scale, left + (x + 1) * scale - 1, top + (y + 1) * scale - 1), fill=0
         )
 
 
+COLUMN = 70  # px: the robot's column on the right of the screen, divider included
+
 # Short labels under the robot, for the names that don't fit its column.
-LABELS: dict[str, str] = {
+LABELS: dict[Emotion, str] = {
     "look_r": "look >",
     "look_l": "< look",
     "look_r_happy": "look > :)",
@@ -329,4 +282,5 @@ LABELS: dict[str, str] = {
 
 
 def label(emotion: Emotion) -> str:
+    """The text under the robot: its emotion, shortened where it wouldn't fit."""
     return LABELS.get(emotion, emotion)

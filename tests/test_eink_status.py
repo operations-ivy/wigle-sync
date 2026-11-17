@@ -6,6 +6,7 @@ from __future__ import annotations
 import dataclasses
 import json
 from datetime import datetime
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -43,7 +44,7 @@ def test_on_the_road():
     assert eink.screen_lines(driving()) == [
         "root@scootypuffsr:~#",
         "$ away gps 3d 9 sat",
-        "$ kismet BT ok wifi ok",
+        "$ kismet bt ok wifi ok",
         "$ heard 250w 30bt",
         "$ batt 78%",
         "$ sync 3h ago",
@@ -72,7 +73,7 @@ def test_no_battery_reading_leaves_the_line_out():
 
 def test_a_source_in_error():
     lines = eink.screen_lines(driving(sources={"usb_bt": "off", "wlan_mon0": "ERR"}))
-    assert lines[2] == "$ kismet BT off wifi ERR"
+    assert lines[2] == "$ kismet bt off wifi ERR"
     assert eink.screen_lines(driving(sources={}))[2] == "$ kismet: no sources"
 
 
@@ -87,8 +88,8 @@ def test_source_state_and_label():
     assert eink.source_state({"kismet.datasource.running": 1, "kismet.datasource.error": 0}) == "ok"
     assert eink.source_state({"kismet.datasource.running": 1, "kismet.datasource.error": 1}) == "ERR"
     assert eink.source_state({"kismet.datasource.running": 0}) == "off"
-    assert eink.source_label("usb_bt") == "BT"
-    assert eink.source_label("hci0") == "BT"
+    assert eink.source_label("usb_bt") == "bt"
+    assert eink.source_label("hci0") == "bt"
     assert eink.source_label("wlan_mon0") == "wifi"
 
 
@@ -134,15 +135,15 @@ def test_nothing_to_send_leaves_the_clock_alone():
         ({}, "cool"),
         ({"recent": {"wifi": 350, "bluetooth": 60}}, "excited"),
         ({"gps_mode": 1}, "look_l"),  # 12:34: the first five minutes of the turn
-        ({"gps_mode": 1, "now": datetime(2026, 11, 16, 12, 39)}, "look_r"),
+        ({"gps_mode": 1, "now": NOON + timedelta(minutes=5)}, "look_r"),
         ({"home": True, "kismet_up": False, "sources": {}, "to_send": 0}, "sleep"),
         (
-            {"home": True, "kismet_up": False, "sources": {}, "to_send": 0, "now": datetime(2026, 11, 16, 12, 45)},
+            {"home": True, "kismet_up": False, "sources": {}, "to_send": 0, "now": NOON + timedelta(minutes=11)},
             "sleep2",
         ),
         ({"home": None, "kismet_up": False, "sources": {}}, "sleep"),
         ({"home": True, "kismet_up": False, "sources": {}}, "upload2"),  # 12:34: the third step
-        ({"home": True, "kismet_up": False, "sources": {}, "now": datetime(2026, 11, 16, 12, 36)}, "upload"),
+        ({"home": True, "kismet_up": False, "sources": {}, "now": NOON + timedelta(minutes=2)}, "upload"),
         ({"home": False, "kismet_up": False, "sources": {}}, "sad"),
         ({"sources": {"usb_bt": "ok", "wlan_mon0": "ERR"}}, "broken"),
         ({"sources": {}}, "broken"),
@@ -269,25 +270,23 @@ def test_credentials(tmp_path):
     assert eink.credentials(tmp_path / "missing") is None
 
 
-def needs_terminus():
-    pytest.importorskip("PIL")
+@pytest.fixture
+def terminus():
+    """Terminus at the body size, or a skip where it isn't installed."""
+    image_font = pytest.importorskip("PIL.ImageFont")
     if not Path(eink.FONT).exists():
         pytest.skip("no Terminus font (fonts-terminus-otb)")
+    return image_font.truetype(eink.FONT, eink.BODY_SIZE)
 
 
-def test_draw_fits_the_panel():
-    needs_terminus()
+def test_draw_fits_the_panel(terminus):
     image = eink.draw(eink.screen_lines(driving()), face="cool")
     assert image.size == (eink.WIDTH, eink.HEIGHT)
     assert image.mode == "1"
 
 
-def shell_lines_clear_the_robot(lines):
+def assert_clear_of_the_robot(lines, body):
     """Every line under the title bar ends left of the robot's divider."""
-    needs_terminus()
-    from PIL import ImageFont
-
-    body = ImageFont.truetype(eink.FONT, eink.BODY_SIZE)
     left = eink.BORDER + 1 + 5
     divider = eink.WIDTH - 2 - eink.BORDER - eink.FACE_COLUMN
     for line in lines[1:]:
@@ -301,8 +300,8 @@ def shell_lines_clear_the_robot(lines):
         driving(sources={"usb_bt": "off", "wlan_mon0": "ERR"}, clock_synced=False, to_send=12, charging=True),
     ],
 )
-def test_text_clears_the_robot(status):
-    shell_lines_clear_the_robot(eink.screen_lines(status))
+def test_text_clears_the_robot(terminus, status):
+    assert_clear_of_the_robot(eink.screen_lines(status), terminus)
 
 
 # Every screen has the mascot (the user, 2026-11-17), errors included.
@@ -360,5 +359,5 @@ def test_draw_needs_a_face():
         eink.off_lines(None, False, NOON, False),
     ],
 )
-def test_error_and_last_screens_clear_the_robot(lines):
-    shell_lines_clear_the_robot(lines)
+def test_error_and_last_screens_clear_the_robot(terminus, lines):
+    assert_clear_of_the_robot(lines, terminus)
