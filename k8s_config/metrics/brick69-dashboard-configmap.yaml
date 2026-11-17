@@ -49,7 +49,7 @@ data:
         {
           "type": "stat",
           "title": "Last sample",
-          "description": "How long since the newest sample from brick69: long while it's away, until it's home and sends the backlog.",
+          "description": "How long since the newest sample from this Pi: long while it's away, until it's home and sends the backlog.",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -61,7 +61,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "time() - max(timestamp(up{instance=\"brick69\"}))",
+              "expr": "time() - max(timestamp(up{instance=\"$pi\"}))",
               "instant": true,
               "legendFormat": ""
             }
@@ -122,7 +122,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "max(pi_home_wifi)",
+              "expr": "max(pi_home_wifi{instance=\"$pi\"})",
               "instant": true,
               "legendFormat": ""
             }
@@ -199,7 +199,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "max(pi_kismet_running)",
+              "expr": "max(pi_kismet_running{instance=\"$pi\"})",
               "instant": true,
               "legendFormat": ""
             }
@@ -276,7 +276,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "max(pi_gps_fix_mode)",
+              "expr": "max(pi_gps_fix_mode{instance=\"$pi\"})",
               "instant": true,
               "legendFormat": ""
             }
@@ -363,7 +363,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "max(pi_kismet_pending_logs)",
+              "expr": "max(pi_kismet_pending_logs{instance=\"$pi\"})",
               "instant": true,
               "legendFormat": ""
             }
@@ -423,7 +423,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "max(pi_under_voltage_since_boot)",
+              "expr": "max(pi_under_voltage_since_boot{instance=\"$pi\"})",
               "instant": true,
               "legendFormat": ""
             }
@@ -500,8 +500,8 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "max(pi_home_wifi) * 2 + max(pi_kismet_running)",
-              "legendFormat": "brick69"
+              "expr": "max(pi_home_wifi{instance=\"$pi\"}) * 2 + max(pi_kismet_running{instance=\"$pi\"})",
+              "legendFormat": "$pi"
             }
           ],
           "fieldConfig": {
@@ -584,7 +584,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "max(pi_kismet_log_bytes)",
+              "expr": "max(pi_kismet_log_bytes{instance=\"$pi\"})",
               "legendFormat": ""
             }
           ],
@@ -644,7 +644,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "max(pi_gps_fix_mode)",
+              "expr": "max(pi_gps_fix_mode{instance=\"$pi\"})",
               "legendFormat": "fix mode"
             },
             {
@@ -653,7 +653,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "max(pi_gps_satellites_used)",
+              "expr": "max(pi_gps_satellites_used{instance=\"$pi\"})",
               "legendFormat": "satellites"
             }
           ],
@@ -713,7 +713,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "rate(node_network_receive_packets_total{instance=\"brick69\",device=~\"wlan_mon.*\"}[2m])",
+              "expr": "rate(node_network_receive_packets_total{instance=\"$pi\",device=~\"wlan_mon.*\"}[2m])",
               "legendFormat": "{{device}}"
             }
           ],
@@ -773,7 +773,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "max(pi_bt_dongle)",
+              "expr": "max(pi_bt_dongle{instance=\"$pi\"})",
               "legendFormat": "",
               "instant": true
             }
@@ -851,7 +851,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "max(node_thermal_zone_temp{instance=\"brick69\"})",
+              "expr": "max(node_thermal_zone_temp{instance=\"$pi\"})",
               "legendFormat": ""
             }
           ],
@@ -911,7 +911,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "100 * (1 - avg(rate(node_cpu_seconds_total{instance=\"brick69\",mode=\"idle\"}[2m])))",
+              "expr": "100 * (1 - avg(rate(node_cpu_seconds_total{instance=\"$pi\",mode=\"idle\"}[2m])))",
               "legendFormat": ""
             }
           ],
@@ -972,7 +972,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "max(pi_under_voltage)",
+              "expr": "max(pi_under_voltage{instance=\"$pi\"})",
               "legendFormat": "under-voltage"
             },
             {
@@ -981,7 +981,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "max(pi_throttled)",
+              "expr": "max(pi_throttled{instance=\"$pi\"})",
               "legendFormat": "throttled"
             },
             {
@@ -990,7 +990,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "max(pi_freq_capped)",
+              "expr": "max(pi_freq_capped{instance=\"$pi\"})",
               "legendFormat": "frequency capped"
             }
           ],
@@ -1051,7 +1051,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "node_timex_offset_seconds{instance=\"brick69\"}",
+              "expr": "node_timex_offset_seconds{instance=\"$pi\"}",
               "legendFormat": ""
             }
           ],
@@ -1111,7 +1111,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "100 * (1 - node_filesystem_avail_bytes{instance=\"brick69\",mountpoint=\"/\"} / node_filesystem_size_bytes{instance=\"brick69\",mountpoint=\"/\"})",
+              "expr": "100 * (1 - node_filesystem_avail_bytes{instance=\"$pi\",mountpoint=\"/\"} / node_filesystem_size_bytes{instance=\"$pi\",mountpoint=\"/\"})",
               "legendFormat": ""
             }
           ],
@@ -1172,7 +1172,7 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "max(pi_clock_wait_seconds)",
+              "expr": "max(pi_clock_wait_seconds{instance=\"$pi\"})",
               "legendFormat": "waited"
             }
           ],
@@ -1239,10 +1239,25 @@ data:
       "tags": [
         "wigle",
         "wardriving",
-        "brick69"
+        "brick69",
+        "scootypuffsr"
       ],
       "templating": {
-        "list": []
+        "list": [
+          {
+            "name": "pi",
+            "label": "Pi",
+            "type": "query",
+            "datasource": {"type": "prometheus", "uid": "prometheus"},
+            "query": {"query": "label_values(pi_home_wifi, instance)", "refId": "pi"},
+            "definition": "label_values(pi_home_wifi, instance)",
+            "current": {"text": "brick69", "value": "brick69"},
+            "refresh": 2,
+            "sort": 1,
+            "multi": false,
+            "includeAll": false
+          }
+        ]
       },
       "time": {
         "from": "now-2d",
@@ -1250,7 +1265,7 @@ data:
       },
       "timepicker": {},
       "timezone": "browser",
-      "title": "brick69: the wardriving Pi",
+      "title": "Wardriving Pi: $pi",
       "uid": "brick69",
       "version": 1
     }
