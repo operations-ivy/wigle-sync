@@ -27,6 +27,8 @@ DRIVING = eink.Status(
     recent={"wifi": 247, "bluetooth": 31},
     battery_percent=78.4,
     charging=False,
+    last_sync=NOON.timestamp() - 3 * 3600 - 60,
+    to_send=2,
     clock_synced=True,
     now=NOON,
 )
@@ -42,7 +44,8 @@ def test_on_the_road():
         "BT ok   Wi-Fi ok",
         "Heard 250 Wi-Fi  30 BT",
         "Battery 78%",
-        "12:34",
+        "Sync 3h ago",
+        "12:34  2 to send",
     ]
 
 
@@ -55,7 +58,7 @@ def test_at_home_with_kismet_stopped_and_charging():
 
 def test_unknowns():
     lines = eink.screen_lines(eink.Status(now=NOON))
-    assert lines == ["?  GPS ?", "Kismet stopped", "Heard -", "Battery ?", "12:34 ?"]
+    assert lines == ["?  GPS ?", "Kismet stopped", "Heard -", "Battery ?", "Sync never", "12:34 ?"]
 
 
 def test_a_source_in_error():
@@ -80,9 +83,83 @@ def test_source_state_and_label():
     assert eink.source_label("wlan_mon0") == "Wi-Fi"
 
 
-@pytest.mark.parametrize("n, shown", [(0, 0), (19, 19), (22, 20), (23, 25), (99, 100), (104, 100), (1234, 1230)])
+@pytest.mark.parametrize(
+    "n, shown",
+    [
+        (0, "0"),
+        (19, "19"),
+        (22, "20"),
+        (23, "25"),
+        (99, "100"),
+        (104, "100"),
+        (994, "990"),
+        (995, "1.0k"),
+        (1234, "1.2k"),
+    ],
+)
 def test_rounded(n, shown):
     assert eink.rounded(n) == shown
+
+
+@pytest.mark.parametrize(
+    "seconds, shown", [(-60, "<1h"), (0, "<1h"), (3599, "<1h"), (3600, "1h"), (47 * 3600, "47h"), (48 * 3600, "2d")]
+)
+def test_ago(seconds, shown):
+    assert eink.ago(seconds) == shown
+
+
+def test_sync_text():
+    assert eink.sync_text(None, NOON, True) == "Sync never"
+    assert eink.sync_text(NOON.timestamp() - 5 * 3600, NOON, True) == "Sync 5h ago"
+    # Without the real time, "ago" means nothing: the sync's own time instead.
+    assert eink.sync_text(datetime(2026, 11, 14, 21, 5).timestamp(), NOON, False) == "Sync 11-14 21:05"
+
+
+def test_nothing_to_send_leaves_the_clock_alone():
+    assert eink.screen_lines(driving(to_send=0))[-1] == "12:34"
+
+
+@pytest.mark.parametrize(
+    "changes, face",
+    [
+        ({}, "stoked"),
+        ({"gps_mode": 1}, "searching"),
+        ({"home": True, "kismet_up": False, "sources": {}}, "sleepy"),
+        ({"home": None, "kismet_up": False, "sources": {}}, "sleepy"),
+        ({"home": False, "kismet_up": False, "sources": {}}, "uh oh"),
+        ({"sources": {"usb_bt": "ok", "wlan_mon0": "ERR"}}, "uh oh"),
+        ({"sources": {}}, "uh oh"),
+        ({"battery_percent": 20.0}, "low"),
+        ({"battery_percent": 20.0, "charging": True}, "stoked"),
+        ({"battery_percent": None}, "stoked"),
+    ],
+)
+def test_mood(changes, face):
+    assert eink.mood(driving(**changes)) == face
+
+
+@pytest.mark.parametrize("face", list(eink.FACES))
+def test_sprites_are_16_by_16(face):
+    rows = eink.sprite(face)
+    assert len(rows) == 16
+    assert all(len(row) == 16 and set(row) <= {"#", "."} for row in rows)
+
+
+def test_each_mood_has_its_own_face():
+    assert len({tuple(eink.sprite(face)) for face in eink.FACES}) == len(eink.FACES)
+
+
+def test_last_sync_and_to_send(tmp_path):
+    uploaded = tmp_path / "uploaded"
+    assert eink.last_sync(uploaded) is None
+    uploaded.mkdir()
+    assert eink.last_sync(uploaded) is None
+    (uploaded / "Kismet-20261116-10-00-00-1.wiglecsv").write_text("x")
+    assert eink.last_sync(uploaded) == pytest.approx((uploaded / "Kismet-20261116-10-00-00-1.wiglecsv").stat().st_ctime)
+    assert eink.to_send(tmp_path) == 0
+    (tmp_path / "Kismet-20261116-12-00-00-1.wiglecsv").write_text("x")
+    (tmp_path / "Kismet-20261116-12-00-00-1.kismet").write_text("x")
+    assert eink.to_send(tmp_path) == 1
 
 
 def test_count_recent():
@@ -184,6 +261,26 @@ def test_draw_fits_the_panel():
     pytest.importorskip("PIL")
     if not Path(eink.FONT).exists():
         pytest.skip("no DejaVu fonts")
-    image = eink.draw(eink.screen_lines(driving()))
+    image = eink.draw(eink.screen_lines(driving()), face="stoked")
     assert image.size == (eink.WIDTH, eink.HEIGHT)
     assert image.mode == "1"
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        driving(recent={"wifi": 1234, "bluetooth": 150}, to_send=12, satellites=12),
+        driving(sources={"usb_bt": "off", "wlan_mon0": "ERR"}, clock_synced=False, to_send=12),
+    ],
+)
+def test_text_clears_the_mascot(status):
+    """The widest lines end left of the mascot (the top line runs over it)."""
+    image_font = pytest.importorskip("PIL.ImageFont")
+    if not Path(eink.FONT).exists():
+        pytest.skip("no DejaVu fonts")
+    body, small = image_font.truetype(eink.FONT, 14), image_font.truetype(eink.FONT, 13)
+    lines = eink.screen_lines(status)
+    mascot_left = eink.WIDTH - 16 * eink.SCALE - 2
+    for line in lines[1:-1]:
+        assert 4 + body.getlength(line) < mascot_left, line
+    assert 4 + small.getlength(lines[-1]) < mascot_left
