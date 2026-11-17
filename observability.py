@@ -137,8 +137,9 @@ DEVICE_GROUP_LABEL = "pi"
 
 
 def device_registry(stats: RunStats, finished_at: float) -> CollectorRegistry:
-    """One Pi's results as wigle_sync_device_* gauges, for its own Pushgateway
-    group (job wigle-sync, pi <host>): pushadd there replaces only that Pi's,
+    """One Pi's results as wigle_sync_device_* gauges.
+
+    They go to the Pi's own Pushgateway group (job wigle-sync, pi <host>): pushadd there replaces only that Pi's,
     so a Pi away keeps its last sync while the other syncs. Kept apart from
     the run's own wigle_sync_* names, which brick-status and the console read
     by name alone."""
@@ -234,9 +235,13 @@ def push_metrics(stats: RunStats, finished_at: float, recount: Callable[[], dict
         for name, value in _totals(gateway, stats, recount).items():
             gauge(name.removeprefix("wigle_sync_"), TOTALS[name], value)
 
+    # Metrics are best-effort; never fail (or mask the result of) a sync over them.
     try:
         pushadd_to_gateway(gateway, job=SERVICE_NAME, registry=registry, timeout=10)
-        for host, pi in stats.by_pi.items():
+    except Exception:
+        log.warning("Failed to push metrics", gateway=gateway, exc_info=True)
+    for host, pi in stats.by_pi.items():
+        try:
             pushadd_to_gateway(
                 gateway,
                 job=SERVICE_NAME,
@@ -244,6 +249,5 @@ def push_metrics(stats: RunStats, finished_at: float, recount: Callable[[], dict
                 registry=device_registry(pi, finished_at),
                 timeout=10,
             )
-    except Exception:
-        # Metrics are best-effort; never fail (or mask the result of) a sync over them.
-        log.warning("Failed to push metrics", gateway=gateway, exc_info=True)
+        except Exception:
+            log.warning("Failed to push a Pi's metrics", gateway=gateway, host=host, exc_info=True)

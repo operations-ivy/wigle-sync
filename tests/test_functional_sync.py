@@ -143,7 +143,8 @@ def test_a_changed_host_key_is_refused(world, tmp_path):
     (tmp_path / "known_hosts").write_text(f"[127.0.0.1]:{settings.pi_port} ssh-rsa {other.get_base64()}\n")
     stats = RunStats()
     sync.run(settings, stats)  # a failure of that Pi's, not one that stops the run
-    assert stats.failed == 1 and not stats.succeeded
+    assert stats.failed == 1
+    assert not stats.succeeded
     assert stats.by_pi[settings.pi_host].failed == 1
     assert wigle.uploads == [] and archived(kismet) == []
 
@@ -197,6 +198,11 @@ def test_a_kismet_db_cut_off_mid_write_is_uploaded_rolled_back(world, tmp_path):
     assert archived(kismet) == ["Kismet-J.kismet", "Kismet-J.kismet-journal"]
 
 
+def parse_samples(body: bytes) -> dict[str, float]:
+    """A pushed body as Prometheus parses it: each sample's value by name."""
+    return {s.name: s.value for f in text_string_to_metric_families(body.decode()) for s in f.samples}
+
+
 def test_pushed_metrics_read_as_prometheus_reads_them(world):
     """The CronJob's push, as the Pushgateway stores it and Prometheus scrapes it."""
     kismet, settings, _ = world
@@ -234,13 +240,13 @@ def test_pushed_metrics_read_as_prometheus_reads_them(world):
 
     [(path, body), (device_path, device_body)] = pushes
     assert path == "/metrics/job/wigle-sync"
-    samples = {s.name: s.value for f in text_string_to_metric_families(body.decode()) for s in f.samples}
+    samples = parse_samples(body)
     assert samples["wigle_sync_files_uploaded"] == 1
     assert samples["wigle_sync_files_uploaded_since_launch"] == 11
     assert samples["wigle_sync_bytes_uploaded_since_launch"] == 1000 + stats.bytes_uploaded
     # The Pi's own, in its own group: Prometheus sees them labelled pi="127.0.0.1".
     assert device_path == f"/metrics/job/wigle-sync/pi/{settings.pi_host}"
-    device = {s.name: s.value for f in text_string_to_metric_families(device_body.decode()) for s in f.samples}
+    device = parse_samples(device_body)
     assert device["wigle_sync_device_online"] == 1
     assert device["wigle_sync_device_last_sync_files_uploaded"] == 1
     assert device["wigle_sync_device_last_online_timestamp_seconds"] == 1000.0

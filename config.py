@@ -54,7 +54,7 @@ class Settings:
 
         remote_dir = os.environ.get("PI_REMOTE_DIR", "/var/log/kismet")
         # PI_HOSTS (comma-separated) for more than one Pi; PI_HOST alone still works.
-        hosts = split_list(os.environ.get("PI_HOSTS", "")) or (os.environ["PI_HOST"],)
+        hosts = split_list(os.environ.get("PI_HOSTS", "")) or split_list(os.environ["PI_HOST"])
         return cls(
             wigle_api_name=os.environ["WIGLE_API_NAME"],
             wigle_api_token=os.environ["WIGLE_API_TOKEN"],

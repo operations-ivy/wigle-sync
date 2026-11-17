@@ -356,8 +356,9 @@ def span_attributes(stats: RunStats) -> dict:
     out = {f"sync.{k}": v for k, v in vars(stats).items() if k not in ("detections", "by_pi")}
     out.update({f"sync.detections.{k}": n for k, n in stats.detections.items()})
     out["sync.pis"] = ",".join(stats.by_pi)
-    out.update({f"sync.pi.{host}.pi_online": pi.pi_online for host, pi in stats.by_pi.items()})
-    out.update({f"sync.pi.{host}.uploaded": pi.uploaded for host, pi in stats.by_pi.items()})
+    for host, pi in stats.by_pi.items():
+        out[f"sync.pi.{host}.pi_online"] = pi.pi_online
+        out[f"sync.pi.{host}.uploaded"] = pi.uploaded
     return out
 
 

@@ -16,6 +16,7 @@ import brick_observe
 
 import console_metrics
 import detect
+from config import split_list
 from observability import DETECTIONS
 from sync import pi_is_online
 from sync import REPORT_EVENT
@@ -39,8 +40,8 @@ AFTER_ACTION_REPORTS = 12
 # Two Pis' drives are the same drive, side by side, when they overlap for at
 # least this share of the shorter one.
 SAME_DRIVE_OVERLAP = 0.5
-# The wardriving Pis, as the sync's PI_HOSTS (or PI_HOST alone).
-PI_HOSTS = tuple(h.strip() for h in os.environ.get("PI_HOSTS", os.environ.get("PI_HOST", "")).split(",") if h.strip())
+# The wardriving Pis, as the sync's PI_HOSTS (or PI_HOST alone, as Settings.from_env reads them).
+PI_HOSTS = split_list(os.environ.get("PI_HOSTS", "")) or split_list(os.environ.get("PI_HOST", ""))
 
 # WiGLE's API is rate limited per day; the numbers only move when an upload
 # finishes processing, so there's no point asking more often than this.
@@ -195,7 +196,8 @@ def pi() -> dict[str, Any]:
             r["metric"].get("pi"): float(r["value"][1])
             for r in _prom("wigle_sync_device_last_online_timestamp_seconds")
         }
-    except Exception:
+    except (requests.RequestException, KeyError, ValueError) as e:
+        log.warning("Couldn't read when the Pis were last found", error=str(e))
         seen = {}  # the probes still answer without Prometheus
     hosts = [
         {
@@ -254,16 +256,19 @@ def after_action() -> dict[str, Any]:
     by_file: dict[tuple[str | None, str], dict[str, Any]] = {}
     for e in lines:  # newest line first: a re-upload's report replaces the old one
         r = e.get("report")
+        if e.get("event") != REPORT_EVENT or not isinstance(r, dict) or "file" not in r:
+            continue
         # Two Pis can name a session alike (the same start second): keyed by both.
-        key = (e.get("pi"), r.get("file") if isinstance(r, dict) else None)
-        if e.get("event") == REPORT_EVENT and isinstance(r, dict) and key not in by_file:
+        key = (e.get("pi"), r["file"])
+        if key not in by_file:
             by_file[key] = {**r, "pi": e.get("pi"), "logged_at": e["_ts"]}
     reports = sorted(by_file.values(), key=lambda r: r.get("start") or 0, reverse=True)[:AFTER_ACTION_REPORTS]
     return {"reports": reports, "side_by_side": side_by_side(reports)}
 
 
 def _overlap(a: dict[str, Any], b: dict[str, Any]) -> float:
-    """How much of the shorter drive the two share, 0 to 1."""
+    """How much of the shorter drive the two share, 0 to 1; 0 if either
+    has no start or end."""
     try:
         shared = min(a["end"], b["end"]) - max(a["start"], b["start"])
         shorter = min(a["end"] - a["start"], b["end"] - b["start"])
@@ -292,16 +297,22 @@ def side_by_side(reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
     compare."""
     pairs = []
     for a, b in combinations(reports, 2):
-        if a.get("pi") and b.get("pi") and a["pi"] != b["pi"] and _overlap(a, b) >= SAME_DRIVE_OVERLAP:
-            first, second = sorted((a, b), key=lambda r: PI_HOSTS.index(r["pi"]) if r["pi"] in PI_HOSTS else 99)
+        if not (a.get("pi") and b.get("pi")) or a["pi"] == b["pi"]:
+            continue
+        if (overlap := _overlap(a, b)) >= SAME_DRIVE_OVERLAP:
             pairs.append(
                 {
                     "start": min(a["start"], b["start"]),
-                    "overlap": round(_overlap(a, b), 2),
-                    "pis": [_drive_numbers(first), _drive_numbers(second)],
+                    "overlap": round(overlap, 2),
+                    "pis": [_drive_numbers(r) for r in sorted((a, b), key=_pi_rank)],
                 }
             )
     return sorted(pairs, key=lambda p: p["start"], reverse=True)
+
+
+def _pi_rank(report: dict[str, Any]) -> int:
+    """A report's Pi's place in PI_HOSTS, unknown Pis last."""
+    return PI_HOSTS.index(report["pi"]) if report["pi"] in PI_HOSTS else len(PI_HOSTS)
 
 
 _UPLOAD_NAME = re.compile(r"^\d+_(.+?\.(?:kismet|wiglecsv))")
