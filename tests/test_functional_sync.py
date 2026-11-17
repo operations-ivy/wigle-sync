@@ -142,8 +142,9 @@ def test_a_changed_host_key_is_refused(world, tmp_path):
     other = paramiko.RSAKey.generate(2048)
     (tmp_path / "known_hosts").write_text(f"[127.0.0.1]:{settings.pi_port} ssh-rsa {other.get_base64()}\n")
     stats = RunStats()
-    with pytest.raises(paramiko.SSHException):
-        sync.run(settings, stats)
+    sync.run(settings, stats)  # a failure of that Pi's, not one that stops the run
+    assert stats.failed == 1 and not stats.succeeded
+    assert stats.by_pi[settings.pi_host].failed == 1
     assert wigle.uploads == [] and archived(kismet) == []
 
 
@@ -231,11 +232,18 @@ def test_pushed_metrics_read_as_prometheus_reads_them(world):
         server.shutdown()
         server.server_close()
 
-    [(path, body)] = pushes
+    [(path, body), (device_path, device_body)] = pushes
     assert path == "/metrics/job/wigle-sync"
     samples = {s.name: s.value for f in text_string_to_metric_families(body.decode()) for s in f.samples}
     assert samples["wigle_sync_files_uploaded"] == 1
     assert samples["wigle_sync_files_uploaded_since_launch"] == 11
     assert samples["wigle_sync_bytes_uploaded_since_launch"] == 1000 + stats.bytes_uploaded
+    # The Pi's own, in its own group: Prometheus sees them labelled pi="127.0.0.1".
+    assert device_path == f"/metrics/job/wigle-sync/pi/{settings.pi_host}"
+    device = {s.name: s.value for f in text_string_to_metric_families(device_body.decode()) for s in f.samples}
+    assert device["wigle_sync_device_online"] == 1
+    assert device["wigle_sync_device_last_sync_files_uploaded"] == 1
+    assert device["wigle_sync_device_last_online_timestamp_seconds"] == 1000.0
+    assert not any(name.startswith("wigle_sync_device_") for name in samples)
     assert samples["wigle_sync_last_success_timestamp_seconds"] == 1000.0
     assert samples["wigle_sync_pi_online"] == 1

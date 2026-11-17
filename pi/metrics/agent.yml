@@ -5,15 +5,16 @@
 # on-disk queue, across reboots; back home it sends the backlog, which
 # Prometheus accepts up to 24h old (brick-k8s-config: outOfOrderTimeWindow).
 # The Pi's clock comes from GPS away from home (chrony), so those samples
-# carry the right time.
+# carry the right time. setup-metrics.sh fills in the Pi's hostname below,
+# so each wardriving Pi is its own instance.
 global:
   scrape_interval: 30s
 scrape_configs:
-  - job_name: brick69-node
+  - job_name: PI_NAME-node
     static_configs:
       - targets: ["127.0.0.1:9100"]
         labels:
-          instance: brick69
+          instance: PI_NAME
     # The wifi collector lists stations by MAC address on the capture radio:
     # keep only the home Wi-Fi link.
     metric_relabel_configs:
@@ -21,8 +22,8 @@ scrape_configs:
         regex: "node_wifi_station_.+;wlan_mon.*"
         action: drop
   # The queue itself: vmagent_remotewrite_pending_data_bytes is the backlog.
-  - job_name: brick69-vmagent
+  - job_name: PI_NAME-vmagent
     static_configs:
       - targets: ["127.0.0.1:8429"]
         labels:
-          instance: brick69
+          instance: PI_NAME

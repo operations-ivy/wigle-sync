@@ -121,3 +121,78 @@ def test_after_action_keeps_each_files_newest_report_newest_drive_first():
         ("Kismet-b.wiglecsv", 5, 200),
         ("Kismet-a.wiglecsv", 2, 300),
     ]
+
+
+def test_last_run_leaves_the_per_pi_series_out():
+    with mock.patch.object(stats, "_prom_values", return_value={}) as values:
+        stats.last_run()
+    assert '__name__!~"wigle_sync_device_.+"' in values.call_args.args[0]
+
+
+def _report(pi, name, start, end, wifi, bt=0, ble=0):
+    return {
+        "_ts": start,
+        "pi": pi,
+        "event": stats.REPORT_EVENT,
+        "report": {
+            "file": name,
+            "start": start,
+            "end": end,
+            "duration_seconds": end - start,
+            "distance_km": 10.0,
+            "rows": wifi,
+            "devices": {"wifi": wifi, "bt": bt, "ble": ble},
+        },
+    }
+
+
+def test_two_pis_naming_a_session_alike_keep_both_reports():
+    lines = [
+        _report("scootypuffsr", "Kismet-a.wiglecsv", 0, 600, 5),
+        _report("brick69", "Kismet-a.wiglecsv", 0, 600, 7),
+    ]
+    with mock.patch.object(stats, "_loki_lines", return_value=lines):
+        reports = stats.after_action()["reports"]
+    assert sorted(r["pi"] for r in reports) == ["brick69", "scootypuffsr"]
+
+
+def test_side_by_side_pairs_drives_the_pis_made_together():
+    lines = [
+        _report("scootypuffsr", "Kismet-s2.wiglecsv", 5000, 6000, 40),  # alone
+        _report("scootypuffsr", "Kismet-s1.wiglecsv", 1060, 2000, 90, ble=12),
+        _report("brick69", "Kismet-b1.wiglecsv", 1000, 2050, 100, bt=3, ble=10),
+    ]
+    with (
+        mock.patch.object(stats, "PI_HOSTS", ("brick69", "scootypuffsr")),
+        mock.patch.object(stats, "_loki_lines", return_value=lines),
+    ):
+        [pair] = stats.after_action()["side_by_side"]
+    assert pair["start"] == 1000
+    assert [p["pi"] for p in pair["pis"]] == ["brick69", "scootypuffsr"]  # PI_HOSTS' order
+    assert [(p["wifi"], p["bluetooth"]) for p in pair["pis"]] == [(100, 13), (90, 12)]
+
+
+def test_side_by_side_needs_two_pis_and_enough_overlap():
+    same_pi = [_report("brick69", "a", 0, 1000, 1)["report"] | {"pi": "brick69"}] * 2
+    assert stats.side_by_side(same_pi) == []
+    a = _report("brick69", "a", 0, 1000, 1)["report"] | {"pi": "brick69"}
+    b = _report("scootypuffsr", "b", 900, 1900, 1)["report"] | {"pi": "scootypuffsr"}
+    assert stats.side_by_side([a, b]) == []  # 10% shared: not the same drive
+    old = {**a, "pi": None}
+    assert stats.side_by_side([old, b | {"start": 0, "end": 1000}]) == []  # reports from before PI_HOSTS
+
+
+def test_pi_reports_each_host():
+    rows = [{"metric": {"pi": "brick69"}, "value": [0, "1000"]}]
+    with (
+        mock.patch.object(stats, "_cache", stats._Cache()),
+        mock.patch.object(stats, "PI_HOSTS", ("brick69", "scootypuffsr")),
+        mock.patch.object(stats, "_prom", return_value=rows),
+        mock.patch.object(stats, "pi_is_online", side_effect=lambda host, port, timeout: host == "scootypuffsr"),
+    ):
+        out = stats.pi()
+    assert out["host"] == "brick69" and out["online_now"] is False
+    assert out["hosts"] == [
+        {"host": "brick69", "online_now": False, "last_online": 1000.0},
+        {"host": "scootypuffsr", "online_now": True, "last_online": None},
+    ]

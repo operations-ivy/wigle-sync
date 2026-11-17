@@ -56,7 +56,12 @@ install -m 644 "$SRC/pi-metrics.service" "$SRC/pi-metrics.timer" /etc/systemd/sy
 # whole time-series database: never wanted here.
 systemctl disable --now victoria-metrics.service 2>/dev/null || true
 systemctl mask victoria-metrics.service
-install -D -m 644 "$SRC/agent.yml" /etc/vmagent/agent.yml
+# Named for this Pi: brick69's series stay brick69's, a second Pi gets its own.
+name=$(hostname -s)
+install -d /etc/vmagent
+sed "s/PI_NAME/$name/g" "$SRC/agent.yml" > /etc/vmagent/agent.yml.new
+chmod 644 /etc/vmagent/agent.yml.new
+mv /etc/vmagent/agent.yml.new /etc/vmagent/agent.yml
 install -m 644 "$SRC/vmagent.service" /etc/systemd/system/vmagent.service
 
 # The Prometheus agent it replaced (#47), and that agent's WAL: what's in it

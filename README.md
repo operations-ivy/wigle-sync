@@ -277,6 +277,19 @@ See `.env.template` for everything. In short: `WIGLE_API_NAME`/`WIGLE_API_TOKEN`
 come from wigle.net → Account → API Token, and `PI_*` describes how to reach the
 Pi and where its logs live.
 
+### More than one Pi
+
+`PI_HOSTS` (comma-separated, e.g. `brick69,scootypuffsr`) syncs each Pi in
+turn in one run; `PI_HOST` alone still works for one. Every Pi is reached
+the same way (`PI_USER`, the key, the log dirs), and `known_hosts` holds a
+line for each. One Pi's trouble (away, an unknown host key) never stops the
+next; WiGLE unreachable leaves every later Pi's files for the next run. The
+run's `wigle_sync_*` metrics are the whole run's (summed; the Pi "online" if
+any was); each Pi also gets `wigle_sync_device_*` in its own Pushgateway group
+(`pi="<host>"`), and its log lines carry `pi`. The console shows each Pi home
+or away, tags each after-action report with its Pi, and puts drives two Pis
+made together (overlapping by half or more) in a **Side by side** table.
+
 ## Console (`https://wigle.brick.nozdormu.cloud`)
 
 A read-only status page in the same style as chucks-wisdom's console
@@ -383,7 +396,8 @@ down. Liveness stays on `/health`.
 ## Metrics
 
 - **The sync job** pushes `wigle_sync_*` to the Pushgateway at the end of
-  each run ("WiGLE Sync" dashboard, `k8s_config/metrics/`).
+  each run ("WiGLE Sync" dashboard, `k8s_config/metrics/`), and
+  `wigle_sync_device_*{pi="<host>"}` for each Pi.
 - **wigle-console** serves `/metrics` (`console_metrics.py`, scraped through
   `k8s_config/metrics/console-podmonitor.yaml`): requests by route, the
   radar's refreshes, drives and contacts, failed status sections, and the
@@ -395,7 +409,7 @@ down. Liveness stays on `/health`.
   the logs waiting, the GPS fix and satellites, whether the Bluetooth dongle is `hci0`, power and
   throttling flags, home or away. Prometheus can't reach the Pi while it's
   out, so **vmagent** on it (Debian's `victoria-metrics` package,
-  `pi/metrics/vmagent.service`) scrapes those and remote-writes to
+  `pi/metrics/vmagent.service`, its `instance` the Pi's hostname) scrapes those and remote-writes to
   `prometheus.brick.nozdormu.cloud`; away, the samples wait in its on-disk
   queue and arrive once it's home (the cluster's Prometheus accepts them up
   to 24 hours late). The queue survives the reboot in between and a pulled

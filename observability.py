@@ -5,6 +5,7 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import field
+from dataclasses import fields
 
 import brick_observe
 import requests
@@ -48,10 +49,31 @@ class RunStats:
     duration_seconds: float = 0.0
     # Surveillance and tracking devices on the drives synced this run, by kind (detect.py).
     detections: Counter = field(default_factory=Counter)
+    # With more than one Pi (Settings.pi_hosts): each one's own, by host. The
+    # fields above are then the whole run's: summed, and online if any Pi was.
+    by_pi: dict[str, RunStats] = field(default_factory=dict)
 
     @property
     def succeeded(self) -> bool:
         return self.failed == 0
+
+    def add(self, other: RunStats) -> None:
+        """Count another Pi's results into the run's."""
+        for f in fields(self):
+            if f.name == "pi_online":
+                self.pi_online = self.pi_online or other.pi_online
+            elif f.name == "detections":
+                self.detections.update(other.detections)
+            elif f.name != "by_pi":
+                setattr(self, f.name, getattr(self, f.name) + getattr(other, f.name))
+
+    def as_dict(self) -> dict:
+        """The counts as plain values, for a log line: by_pi nested the same way."""
+        out = {f.name: getattr(self, f.name) for f in fields(self) if f.name not in ("detections", "by_pi")}
+        out["detections"] = dict(self.detections)
+        if self.by_pi:
+            out["by_pi"] = {host: pi.as_dict() for host, pi in self.by_pi.items()}
+        return out
 
 
 def pushed_totals(gateway: str) -> dict[str, float]:
@@ -109,6 +131,37 @@ def push_totals(gateway: str, totals: dict[str, float]) -> None:
     for name, value in totals.items():
         Gauge(name, TOTALS[name], registry=registry).set(value)
     pushadd_to_gateway(gateway, job=SERVICE_NAME, registry=registry, timeout=10)
+
+
+DEVICE_GROUP_LABEL = "pi"
+
+
+def device_registry(stats: RunStats, finished_at: float) -> CollectorRegistry:
+    """One Pi's results as wigle_sync_device_* gauges, for its own Pushgateway
+    group (job wigle-sync, pi <host>): pushadd there replaces only that Pi's,
+    so a Pi away keeps its last sync while the other syncs. Kept apart from
+    the run's own wigle_sync_* names, which brick-status and the console read
+    by name alone."""
+    registry = CollectorRegistry()
+
+    def gauge(name: str, doc: str, value: float) -> None:
+        Gauge(f"wigle_sync_device_{name}", doc, registry=registry).set(value)
+
+    gauge("last_run_timestamp_seconds", "When the sync last ran for this Pi", finished_at)
+    gauge("online", "Whether this Pi answered on the last run (1/0)", int(stats.pi_online))
+    gauge("files_found", "Capture files ready on this Pi in the last run", stats.files_found)
+    gauge("files_uploaded", "This Pi's files uploaded to WiGLE in the last run", stats.uploaded)
+    gauge("files_failed", "This Pi's files that failed to sync in the last run", stats.failed)
+    gauge("files_deferred", "This Pi's files left for next run, WiGLE unreachable", stats.deferred)
+    gauge("bytes_uploaded", "Bytes of this Pi's uploaded in the last run", stats.bytes_uploaded)
+    if stats.pi_online:
+        gauge("last_online_timestamp_seconds", "When this Pi was last reachable", finished_at)
+        gauge("last_sync_files_uploaded", "Files uploaded by the last run that found this Pi", stats.uploaded)
+        gauge("last_sync_bytes_uploaded", "Bytes uploaded by the last run that found this Pi", stats.bytes_uploaded)
+        gauge("last_sync_files_failed", "Files that failed in the last run that found this Pi", stats.failed)
+        if stats.succeeded and not stats.deferred:
+            gauge("last_success_timestamp_seconds", "When a sync with this Pi last completed cleanly", finished_at)
+    return registry
 
 
 def push_metrics(stats: RunStats, finished_at: float, recount: Callable[[], dict[str, float]] | None = None) -> None:
@@ -183,6 +236,14 @@ def push_metrics(stats: RunStats, finished_at: float, recount: Callable[[], dict
 
     try:
         pushadd_to_gateway(gateway, job=SERVICE_NAME, registry=registry, timeout=10)
+        for host, pi in stats.by_pi.items():
+            pushadd_to_gateway(
+                gateway,
+                job=SERVICE_NAME,
+                grouping_key={DEVICE_GROUP_LABEL: host},
+                registry=device_registry(pi, finished_at),
+                timeout=10,
+            )
     except Exception:
         # Metrics are best-effort; never fail (or mask the result of) a sync over them.
         log.warning("Failed to push metrics", gateway=gateway, exc_info=True)

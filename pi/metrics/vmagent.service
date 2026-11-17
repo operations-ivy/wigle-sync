@@ -7,7 +7,7 @@
 # few blocks (about a minute) in memory. After wait-for-clock, so samples
 # aren't stamped with the time the Pi last saved (no RTC).
 [Unit]
-Description=vmagent: brick69's metrics to the cluster's Prometheus, queued on disk while away
+Description=vmagent: this Pi's metrics to the cluster's Prometheus, queued on disk while away
 After=network.target wait-for-clock.service
 Wants=wait-for-clock.service
 

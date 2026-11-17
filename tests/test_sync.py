@@ -77,12 +77,95 @@ def test_wigle_unreachable_defers_the_rest_of_the_run():
         mock.patch("sync.sync_file", side_effect=[None, WigleUnreachable("no internet"), None]) as sync_file,
     ):
         pi_client.return_value.list_ready_files.return_value = files
-        run(mock.Mock(), stats)
+        run(_settings(), stats)
 
     assert sync_file.call_count == 2  # stopped at the first unreachable upload
     assert stats.deferred == 2
     assert stats.failed == 0
     assert stats.succeeded
+
+
+def test_wigle_unreachable_leaves_the_next_pis_files_alone():
+    files = [mock.Mock(name=f"f{i}") for i in range(2)]
+    stats = RunStats()
+    with (
+        mock.patch("sync.pi_is_online", return_value=True),
+        mock.patch("sync.WigleClient"),
+        mock.patch("sync.PiClient") as pi_client,
+        mock.patch("sync.sync_file", side_effect=WigleUnreachable("no internet")) as sync_file,
+    ):
+        pi_client.return_value.list_ready_files.return_value = files
+        run(_settings(pi_hosts=("brick69", "scootypuffsr")), stats)
+
+    assert sync_file.call_count == 1
+    assert stats.by_pi["brick69"].deferred == 2 and stats.by_pi["scootypuffsr"].deferred == 2
+    assert stats.deferred == 4 and stats.succeeded
+
+
+def test_every_pi_is_synced_and_counted_on_its_own():
+    online = {"brick69": True, "scootypuffsr": False}
+    stats = RunStats()
+    with (
+        mock.patch("sync.pi_is_online", side_effect=lambda host, port, timeout: online[host]),
+        mock.patch("sync.WigleClient"),
+        mock.patch("sync.PiClient") as pi_client,
+        mock.patch("sync.ledgers.open_ledger"),
+        mock.patch("sync.sync_file") as sync_file,
+    ):
+        pi_client.return_value.list_ready_files.return_value = [mock.Mock(name="f")]
+        sync_file.side_effect = lambda pi, wigle, f, settings, stats, ledger: setattr(stats, "uploaded", 1)
+        run(_settings(pi_hosts=("brick69", "scootypuffsr")), stats)
+
+    assert [c.args[0].pi_host for c in pi_client.call_args_list] == ["brick69"]
+    assert stats.by_pi["brick69"].pi_online and stats.by_pi["brick69"].uploaded == 1
+    assert not stats.by_pi["scootypuffsr"].pi_online
+    assert stats.pi_online and stats.uploaded == 1 and stats.files_found == 1
+
+
+def test_one_pis_failure_doesnt_stop_the_next():
+    stats = RunStats()
+    with (
+        mock.patch("sync.pi_is_online", return_value=True),
+        mock.patch("sync.WigleClient"),
+        mock.patch("sync.PiClient") as pi_client,
+        mock.patch("sync.ledgers.open_ledger"),
+    ):
+        pi_client.return_value.connect.side_effect = [ValueError("bad key"), None]
+        pi_client.return_value.list_ready_files.return_value = []
+        run(_settings(pi_hosts=("brick69", "scootypuffsr")), stats)
+
+    assert stats.by_pi["brick69"].failed == 1 and stats.by_pi["scootypuffsr"].failed == 0
+    assert stats.by_pi["scootypuffsr"].pi_online and not stats.succeeded
+
+
+def test_settings_hosts():
+    assert _settings().hosts == ("pi",)
+    assert _settings(pi_hosts=("a", "b")).hosts == ("a", "b")
+
+
+def test_settings_from_env_reads_pi_hosts(monkeypatch):
+    monkeypatch.setenv("WIGLE_API_NAME", "n")
+    monkeypatch.setenv("WIGLE_API_TOKEN", "t")
+    monkeypatch.setenv("PI_HOSTS", "brick69, scootypuffsr,")
+    monkeypatch.setenv("PI_HOST", "ignored")
+    settings = Settings.from_env()
+    assert settings.hosts == ("brick69", "scootypuffsr") and settings.pi_host == "brick69"
+    monkeypatch.delenv("PI_HOSTS")
+    assert Settings.from_env().hosts == ("ignored",)
+
+
+def test_run_stats_add_and_as_dict():
+    run_stats = RunStats()
+    a, b = RunStats(pi_online=True, uploaded=2, bytes_uploaded=10), RunStats(failed=1, uploaded=1)
+    a.detections.update({"flock": 1})
+    run_stats.by_pi = {"a": a, "b": b}
+    run_stats.add(a)
+    run_stats.add(b)
+    assert run_stats.pi_online and run_stats.uploaded == 3 and run_stats.failed == 1
+    assert run_stats.detections == {"flock": 1}
+    out = run_stats.as_dict()
+    assert out["by_pi"]["b"]["failed"] == 1 and out["detections"] == {"flock": 1}
+    assert "by_pi" not in out["by_pi"]["a"]
 
 
 def _settings(**over):

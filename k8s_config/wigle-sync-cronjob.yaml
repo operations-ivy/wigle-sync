@@ -41,7 +41,8 @@ spec:
                       key: WIGLE_API_TOKEN
                 - name: WIGLE_DONATE
                   value: "false"
-                - name: PI_HOST
+                # Every wardriving Pi, comma-separated; synced in this order.
+                - name: PI_HOSTS
                   value: "brick69"
                 - name: PI_USER
                   value: "wigle-sync"

@@ -8,6 +8,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 from datetime import timezone
+from itertools import combinations
 from typing import Any
 
 import requests
@@ -34,7 +35,12 @@ SYNC_CONTAINER = os.environ.get("SYNC_CONTAINER", "wigle-sync")
 # Loki (and so run history / errors) keeps 4 days.
 HISTORY_WINDOW_SECONDS = 4 * 24 * 3600
 # After-action reports the console can switch between (one per drive file).
-AFTER_ACTION_REPORTS = 6
+AFTER_ACTION_REPORTS = 12
+# Two Pis' drives are the same drive, side by side, when they overlap for at
+# least this share of the shorter one.
+SAME_DRIVE_OVERLAP = 0.5
+# The wardriving Pis, as the sync's PI_HOSTS (or PI_HOST alone).
+PI_HOSTS = tuple(h.strip() for h in os.environ.get("PI_HOSTS", os.environ.get("PI_HOST", "")).split(",") if h.strip())
 
 # WiGLE's API is rate limited per day; the numbers only move when an upload
 # finishes processing, so there's no point asking more often than this.
@@ -159,8 +165,9 @@ def schedule() -> dict[str, Any]:
 
 
 def last_run() -> dict[str, Any]:
-    # Labelled series would collapse into one value by name: detections() reads those.
-    v = _prom_values(f'{{__name__=~"wigle_sync_.+", __name__!="{DETECTIONS}"}}')
+    # Labelled series would collapse into one value by name: detections() and
+    # pi() read those (wigle_sync_device_* is per Pi).
+    v = _prom_values(f'{{__name__=~"wigle_sync_.+", __name__!="{DETECTIONS}", __name__!~"wigle_sync_device_.+"}}')
     if not v:
         return {"error": "no wigle_sync metrics in Prometheus yet"}
     return {k.removeprefix("wigle_sync_"): val for k, val in v.items()}
@@ -180,10 +187,26 @@ def detections() -> dict[str, Any]:
 
 
 def pi() -> dict[str, Any]:
-    host = os.environ.get("PI_HOST", "")
+    """Each Pi: home now (a probe), and when the sync last found it. `host`
+    and `online_now` are the first Pi's, as before there was more than one."""
     port = int(os.environ.get("PI_PORT", "22"))
-    online = _cache.get("pi", PI_PROBE_TTL_SECONDS, lambda: pi_is_online(host, port, timeout=1.5))
-    return {"host": host, "online_now": online}
+    try:
+        seen = {
+            r["metric"].get("pi"): float(r["value"][1])
+            for r in _prom("wigle_sync_device_last_online_timestamp_seconds")
+        }
+    except Exception:
+        seen = {}  # the probes still answer without Prometheus
+    hosts = [
+        {
+            "host": host,
+            "online_now": _cache.get(f"pi:{host}", PI_PROBE_TTL_SECONDS, lambda h=host: pi_is_online(h, port, 1.5)),
+            "last_online": seen.get(host),
+        }
+        for host in PI_HOSTS
+    ]
+    first = hosts[0] if hosts else {"host": "", "online_now": False}
+    return {"host": first["host"], "online_now": first["online_now"], "hosts": hosts}
 
 
 def history() -> dict[str, Any]:
@@ -227,14 +250,58 @@ def errors() -> dict[str, Any]:
 def after_action() -> dict[str, Any]:
     """The newest drives' after-action reports (report.py), newest drive first.
     One per file; Loki keeps 4 days, so a Pi left home longer has none."""
-    lines = _loki_lines(f'{{namespace="{NAMESPACE}",container="{SYNC_CONTAINER}"}} |= "{REPORT_EVENT}"', limit=20)
-    by_file: dict[str, dict[str, Any]] = {}
+    lines = _loki_lines(f'{{namespace="{NAMESPACE}",container="{SYNC_CONTAINER}"}} |= "{REPORT_EVENT}"', limit=40)
+    by_file: dict[tuple[str | None, str], dict[str, Any]] = {}
     for e in lines:  # newest line first: a re-upload's report replaces the old one
         r = e.get("report")
-        if e.get("event") == REPORT_EVENT and isinstance(r, dict) and r.get("file") not in by_file:
-            by_file[r["file"]] = {**r, "logged_at": e["_ts"]}
-    reports = sorted(by_file.values(), key=lambda r: r.get("start") or 0, reverse=True)
-    return {"reports": reports[:AFTER_ACTION_REPORTS]}
+        # Two Pis can name a session alike (the same start second): keyed by both.
+        key = (e.get("pi"), r.get("file") if isinstance(r, dict) else None)
+        if e.get("event") == REPORT_EVENT and isinstance(r, dict) and key not in by_file:
+            by_file[key] = {**r, "pi": e.get("pi"), "logged_at": e["_ts"]}
+    reports = sorted(by_file.values(), key=lambda r: r.get("start") or 0, reverse=True)[:AFTER_ACTION_REPORTS]
+    return {"reports": reports, "side_by_side": side_by_side(reports)}
+
+
+def _overlap(a: dict[str, Any], b: dict[str, Any]) -> float:
+    """How much of the shorter drive the two share, 0 to 1."""
+    try:
+        shared = min(a["end"], b["end"]) - max(a["start"], b["start"])
+        shorter = min(a["end"] - a["start"], b["end"] - b["start"])
+    except (KeyError, TypeError):
+        return 0.0
+    return max(0.0, shared) / shorter if shorter > 0 else 0.0
+
+
+def _drive_numbers(r: dict[str, Any]) -> dict[str, Any]:
+    devices = r.get("devices") or {}
+    return {
+        "pi": r.get("pi"),
+        "file": r.get("file"),
+        "start": r.get("start"),
+        "duration_seconds": r.get("duration_seconds"),
+        "distance_km": r.get("distance_km"),
+        "rows": r.get("rows"),
+        "wifi": devices.get("wifi"),
+        "bluetooth": (devices.get("bt") or 0) + (devices.get("ble") or 0),
+    }
+
+
+def side_by_side(reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drives two Pis made together (overlapping by SAME_DRIVE_OVERLAP or
+    more), newest first, each with both Pis' numbers: what the parallel runs
+    compare."""
+    pairs = []
+    for a, b in combinations(reports, 2):
+        if a.get("pi") and b.get("pi") and a["pi"] != b["pi"] and _overlap(a, b) >= SAME_DRIVE_OVERLAP:
+            first, second = sorted((a, b), key=lambda r: PI_HOSTS.index(r["pi"]) if r["pi"] in PI_HOSTS else 99)
+            pairs.append(
+                {
+                    "start": min(a["start"], b["start"]),
+                    "overlap": round(_overlap(a, b), 2),
+                    "pis": [_drive_numbers(first), _drive_numbers(second)],
+                }
+            )
+    return sorted(pairs, key=lambda p: p["start"], reverse=True)
 
 
 _UPLOAD_NAME = re.compile(r"^\d+_(.+?\.(?:kismet|wiglecsv))")

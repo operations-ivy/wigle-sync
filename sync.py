@@ -12,9 +12,12 @@ import sys
 import tarfile
 import tempfile
 import time
+from dataclasses import dataclass
+from dataclasses import replace
 from pathlib import Path
 
 import brick_observe
+import structlog
 from opentelemetry import trace
 from opentelemetry.trace import Status
 from opentelemetry.trace import StatusCode
@@ -221,7 +224,51 @@ def sync_file(
         )
 
 
+@dataclass
+class Shared:
+    """What every Pi in a run shares: one WiGLE client and one ledger, the
+    ledger opened only once a Pi is home."""
+
+    wigle: WigleClient
+    ledger: ledgers.NullLedger | None = None
+    # WiGLE was unreachable (the internet is down): later Pis aren't tried.
+    wigle_down: bool = False
+
+    def open_ledger(self) -> ledgers.NullLedger:
+        if self.ledger is None:
+            with tracer.start_as_current_span("ledger.load"):
+                self.ledger = ledgers.open_ledger(
+                    os.environ.get("KAFKA_BOOTSTRAP"), os.environ.get("LEDGER_TOPIC", ledgers.TOPIC)
+                )
+        return self.ledger
+
+    def close(self) -> None:
+        if self.ledger is not None:
+            self.ledger.close()
+
+
 def run(settings: Settings, stats: RunStats, dry_run: bool = False) -> None:
+    """Sync every Pi in turn (Settings.hosts). Each one's results go in
+    stats.by_pi, and count into the run's; its log lines carry `pi`."""
+    shared = Shared(WigleClient(settings.wigle_api_name, settings.wigle_api_token, donate=settings.wigle_donate))
+    try:
+        for host in settings.hosts:
+            pi_stats = stats.by_pi[host] = RunStats()
+            with structlog.contextvars.bound_contextvars(pi=host), tracer.start_as_current_span("pi.sync") as span:
+                span.set_attribute("pi.host", host)
+                try:
+                    run_pi(replace(settings, pi_host=host), pi_stats, shared, dry_run)
+                except Exception:
+                    # One Pi's trouble (an unknown host key, a missing log dir) never stops the next.
+                    pi_stats.failed += 1
+                    log.exception("Sync with this Pi failed", host=host)
+            stats.add(pi_stats)
+    finally:
+        shared.close()
+
+
+def run_pi(settings: Settings, stats: RunStats, shared: Shared, dry_run: bool = False) -> None:
+    """Sync one Pi, settings.pi_host."""
     # The Pi is out wardriving (or powered off) most of the time — that's the
     # normal case, not a failure. A bare TCP probe answers that in a few seconds
     # before any SSH handshake or WiGLE setup, and the job exits cleanly.
@@ -230,8 +277,6 @@ def run(settings: Settings, stats: RunStats, dry_run: bool = False) -> None:
     if not stats.pi_online:
         log.info("Pi offline, nothing to do", host=settings.pi_host)
         return
-
-    wigle = WigleClient(settings.wigle_api_name, settings.wigle_api_token, donate=settings.wigle_donate)
 
     pi = PiClient(settings)
     try:
@@ -243,23 +288,27 @@ def run(settings: Settings, stats: RunStats, dry_run: bool = False) -> None:
         log.info("Pi went away while connecting, nothing to do", host=settings.pi_host, error=str(e))
         return
 
-    with tracer.start_as_current_span("ledger.load"):
-        ledger = ledgers.open_ledger(os.environ.get("KAFKA_BOOTSTRAP"), os.environ.get("LEDGER_TOPIC", ledgers.TOPIC))
     try:
+        ledger = shared.open_ledger()
         with tracer.start_as_current_span("pi.list"):
             ready = pi.list_ready_files()
         stats.files_found = len(ready)
         log.info("Found files ready to upload", count=len(ready), files=[f.name for f in ready])
+        if shared.wigle_down and ready and not dry_run:
+            stats.deferred = len(ready)
+            log.info("WiGLE unreachable earlier this run, leaving files on the Pi", deferred=stats.deferred)
+            return
 
         for i, remote_file in enumerate(ready):
             if dry_run:
                 log.info("Dry run, would upload", file=remote_file.name, size=remote_file.size)
                 continue
             try:
-                sync_file(pi, wigle, remote_file, settings, stats, ledger)
+                sync_file(pi, shared.wigle, remote_file, settings, stats, ledger)
             except WigleUnreachable as e:
                 # The home internet is down, not something wigle-sync got wrong. Every
                 # file is still on the Pi, so the next run picks them up; stop trying now.
+                shared.wigle_down = True
                 stats.deferred = len(ready) - i
                 log.info(
                     "WiGLE unreachable, leaving files on the Pi for next run", deferred=stats.deferred, error=str(e)
@@ -269,7 +318,6 @@ def run(settings: Settings, stats: RunStats, dry_run: bool = False) -> None:
                 stats.failed += 1
                 log.exception("Failed to sync file, leaving it on the Pi for next run", file=remote_file.name)
     finally:
-        ledger.close()
         pi.close()
 
 
@@ -305,13 +353,16 @@ def seed_totals(settings: Settings, dry_run: bool = False) -> int:
 def span_attributes(stats: RunStats) -> dict:
     """The run's stats as span attributes: a span takes only plain values,
     so detections become one attribute per kind found."""
-    out = {f"sync.{k}": v for k, v in vars(stats).items() if k != "detections"}
+    out = {f"sync.{k}": v for k, v in vars(stats).items() if k not in ("detections", "by_pi")}
     out.update({f"sync.detections.{k}": n for k, n in stats.detections.items()})
+    out["sync.pis"] = ",".join(stats.by_pi)
+    out.update({f"sync.pi.{host}.pi_online": pi.pi_online for host, pi in stats.by_pi.items()})
+    out.update({f"sync.pi.{host}.uploaded": pi.uploaded for host, pi in stats.by_pi.items()})
     return out
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Sync wardriving logs from the Pi to WiGLE")
+    parser = argparse.ArgumentParser(description="Sync wardriving logs from the Pis to WiGLE")
     parser.add_argument("--dry-run", action="store_true", help="list what would be uploaded without uploading")
     parser.add_argument("--check-auth", action="store_true", help="verify WiGLE credentials and exit")
     parser.add_argument(
@@ -351,7 +402,7 @@ def main() -> int:
             span.set_status(Status(StatusCode.ERROR))
             job.fail(f"{stats.failed} failed")
         stats.duration_seconds = time.monotonic() - started
-        log.info("Sync complete", **{**vars(stats), "detections": dict(stats.detections)})
+        log.info("Sync complete", **stats.as_dict())
         if not args.dry_run:
             push_metrics(stats, finished_at=time.time(), recount=lambda: wigle_totals(settings))
 

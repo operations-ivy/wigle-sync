@@ -49,7 +49,8 @@ spec:
               name: wigle-sync-secrets
               key: WIGLE_API_TOKEN
         # Live "is the Pi home" probe — a bare TCP connect, no SSH key needed here.
-        - name: PI_HOST
+        # Every wardriving Pi, comma-separated; synced in this order.
+        - name: PI_HOSTS
           value: "brick69"
         # The radar's centre, "lat,lon" (home). Optional and private: from the
         # Secret, never this file; without it the radar centres on the median

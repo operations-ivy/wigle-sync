@@ -164,6 +164,9 @@ details.panel > summary:focus-visible{ outline:2px solid var(--cyan); outline-of
 .aa-files{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
 .aa-files .toggle{ margin-top:0; }
 .aa-files .toggle[aria-pressed="true"]{ border-color:var(--cyan); color:var(--cyan); }
+.aa-sbs{ margin-bottom:12px; }
+.aa-sbs h3{ font-family:var(--font-mono); font-size:11px; font-weight:400; letter-spacing:.12em; text-transform:uppercase; color:var(--text-faint); margin:0 0 6px; }
+.aa-sbs td.more{ color:var(--cyan); }
 .aa-grid{ display:grid; grid-template-columns:minmax(0,1fr); gap:14px 22px; margin-top:12px; }
 @media (min-width:900px){ .aa-grid{ grid-template-columns:repeat(2, minmax(0,1fr)); } }
 .aa-chart h3{ font-family:var(--font-mono); font-size:11px; font-weight:400; letter-spacing:.12em; text-transform:uppercase; color:var(--text-faint); margin:0 0 6px; }
@@ -316,6 +319,9 @@ details.panel > summary:focus-visible{ outline:2px solid var(--cyan); outline-of
     var pi = d.pi, sch = d.schedule, lr = d.last_run, wg = d.wigle;
 
     if (pi.error) link("link-pi", "pi", '<b class="warn">probe failed</b>');
+    else if (pi.hosts && pi.hosts.length > 1) link("link-pi", "pis", pi.hosts.map(function(h){
+      return esc(h.host) + " " + (h.online_now ? "<b>home</b>" : '<b class="idle">away</b>' + (h.last_online ? " · seen " + ago(h.last_online) : ""));
+    }).join(" · "));
     else if (pi.online_now) link("link-pi", "pi", "<b>home</b>");
     else link("link-pi", "pi", '<b class="idle">away</b>' + (lr.error ? "" : " · seen " + ago(lr.last_pi_online_timestamp_seconds)));
 
@@ -593,6 +599,25 @@ details.panel > summary:focus-visible{ outline:2px solid var(--cyan); outline-of
       '</div>' + chart("Detections", "", dets);
   }
 
+  /* Drives two Pis made together: their numbers in one table, the higher of
+     each pair marked, so the parallel runs can be compared at a glance. */
+  function sideBySide(pairs){
+    if (!pairs.length) return "";
+    var cols = [["duration_seconds", "time", minutes], ["distance_km", "km", num], ["wifi", "Wi-Fi", num],
+                ["bluetooth", "BT", num], ["rows", "rows", num]];
+    var rows = pairs.map(function(p){
+      return p.pis.map(function(x, k){
+        var other = p.pis[1 - k];
+        return '<tr><td>' + (k ? "" : esc(stamp(p.start))) + '</td><td>' + esc(x.pi) + '</td>' + cols.map(function(c){
+          var more = c[0] !== "duration_seconds" && x[c[0]] != null && other[c[0]] != null && x[c[0]] > other[c[0]];
+          return '<td class="num' + (more ? ' more' : '') + '">' + esc(c[2](x[c[0]])) + '</td>';
+        }).join("") + '</tr>';
+      }).join("");
+    }).join("");
+    return '<div class="aa-sbs"><h3>Side by side · <b>drives two Pis made together</b></h3><div class="table-wrap"><table><thead><tr><th>Drive</th><th>Pi</th>' +
+      cols.map(function(c){ return '<th class="num">' + c[1] + '</th>'; }).join("") + '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+  }
+
   function renderAfterAction(d){
     var a = d.after_action;
     if (a.error) { $("aa-body").innerHTML = srcErr(a); $("aa-meta").textContent = ""; return; }
@@ -602,12 +627,12 @@ details.panel > summary:focus-visible{ outline:2px solid var(--cyan); outline-of
       return;
     }
     var i = Math.min(state.aaIndex, a.reports.length - 1), r = a.reports[i];
-    $("aa-meta").textContent = r.file + " · " + stamp(r.start);
+    $("aa-meta").textContent = (r.pi ? r.pi + " · " : "") + r.file + " · " + stamp(r.start);
     var files = a.reports.length > 1 ? '<div class="aa-files">' + a.reports.map(function(x, j){
       return '<button class="toggle" type="button" data-aa="' + j + '" aria-pressed="' + (j === i) + '">' +
-        esc(stamp(x.start) + " · " + minutes(x.duration_seconds)) + '</button>';
+        esc((x.pi ? x.pi + " · " : "") + stamp(x.start) + " · " + minutes(x.duration_seconds)) + '</button>';
     }).join("") + '</div>' : "";
-    $("aa-body").innerHTML = files + renderReport(r);
+    $("aa-body").innerHTML = sideBySide(a.side_by_side || []) + files + renderReport(r);
     Array.prototype.forEach.call(document.querySelectorAll("[data-aa]"), function(b){
       b.addEventListener("click", function(){ state.aaIndex = Number(b.getAttribute("data-aa")); renderAfterAction(state.data); });
     });
