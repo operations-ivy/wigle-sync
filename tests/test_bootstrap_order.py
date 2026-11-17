@@ -1,10 +1,20 @@
 """pi/bootstrap.sh: setup steps that depend on each other run in order."""
 
 import re
-import unittest
 from pathlib import Path
 
+import pytest
+
 PI = Path(__file__).resolve().parent.parent / "pi"
+
+# The setup step for each directory whose unit loads Kismet's web login
+# (kismet_httpd.conf) with LoadCredential: started before the file exists, the
+# unit fails and the run stops (#65).
+LOGIN_LOADERS = {
+    "metrics": "metrics/setup-metrics.sh",
+    "eink": "eink/setup-eink.sh",
+    "leds": "leds/setup-leds.sh",
+}
 
 
 def setup_steps() -> list[str]:
@@ -12,21 +22,14 @@ def setup_steps() -> list[str]:
     return re.findall(r'bash "\$SRC/([\w/.-]+\.sh)"', (PI / "bootstrap.sh").read_text())
 
 
-class BootstrapOrderTest(unittest.TestCase):
-    def test_kismet_login_before_the_units_that_load_it(self):
-        # pi-metrics, eink-status and status-leds load kismet_httpd.conf with
-        # LoadCredential; started before it exists, they fail and stop the run.
-        steps = setup_steps()
-        login = steps.index("setup-kismet-login.sh")
-        for later in ("metrics/setup-metrics.sh", "eink/setup-eink.sh", "leds/setup-leds.sh"):
-            if later in steps:
-                self.assertLess(login, steps.index(later), later)
-
-    def test_every_unit_with_the_kismet_credential_is_covered(self):
-        units = {p.relative_to(PI).parts[0] for p in PI.rglob("*.service")
-                 if "kismet_httpd.conf" in p.read_text()}
-        self.assertLessEqual(units, {"metrics", "eink", "leds"})
+@pytest.mark.parametrize("step", LOGIN_LOADERS.values())
+def test_kismet_login_before_the_units_that_load_it(step):
+    steps = setup_steps()
+    assert step in steps, f"bootstrap.sh no longer runs {step}"
+    assert steps.index("setup-kismet-login.sh") < steps.index(step)
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_every_unit_that_loads_the_login_is_listed():
+    loaders = {unit.relative_to(PI).parts[0] for unit in PI.rglob("*.service")
+               if "kismet_httpd.conf" in unit.read_text()}
+    assert loaders <= LOGIN_LOADERS.keys()
