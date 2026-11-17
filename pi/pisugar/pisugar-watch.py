@@ -149,7 +149,7 @@ class ShutdownGuard:
         return self.low >= self.readings
 
 
-def render_metrics(r: Reading, shutdown_percent: float, up: bool) -> str:
+def render_metrics(r: Reading, shutdown_percent: float) -> str:
     lines = []
 
     def gauge(name: str, doc: str, value) -> None:
@@ -157,7 +157,11 @@ def render_metrics(r: Reading, shutdown_percent: float, up: bool) -> str:
             return
         lines.extend([f"# HELP {name} {doc}", f"# TYPE {name} gauge", f"{name} {value}"])
 
-    gauge("pi_pisugar_up", "1 while pisugar-server answers.", int(up))
+    gauge(
+        "pi_pisugar_up",
+        "1 while the PiSugar gives battery readings (pisugar-server answers and reaches the board).",
+        int(r.ok),
+    )
     gauge("pi_battery_percent", "The PiSugar battery's level (pisugar-server's estimate from its voltage).", r.percent)
     gauge("pi_battery_volts", "The PiSugar battery's voltage.", r.volts)
     gauge(
@@ -258,9 +262,9 @@ def rtc_load(pisugar: PiSugar, log) -> None:
         log.info("clock left alone", rtc=rtc.isoformat() if rtc else None, clock=clock.isoformat())
 
 
-def publish(reading: Reading, up: bool, shutdown_percent: float) -> None:
+def publish(reading: Reading, shutdown_percent: float) -> None:
     """The reading as metrics for node-exporter and as state for the display."""
-    write_atomic(TEXTFILE, render_metrics(reading, shutdown_percent, up))
+    write_atomic(TEXTFILE, render_metrics(reading, shutdown_percent))
     state = {"percent": reading.percent, "volts": reading.volts, "charging": reading.charging, "at": time.time()}
     write_atomic(STATE_DIR / "battery.json", json.dumps(state))
 
@@ -290,26 +294,37 @@ def power_off(reading: Reading, log) -> None:
         log.warning("poweroff failed", returncode=result.returncode, stderr=result.stderr.strip())
 
 
+def board_state(reading: Reading, answered: bool) -> str:
+    """What to log when it changes. pisugar-server can answer while the board
+    doesn't (its I2C pins not touching: every reply "I2C not connected")."""
+    if reading.ok:
+        return "battery readings"
+    if answered:
+        return "pisugar-server answering, but no battery readings (the board isn't on I2C)"
+    return "pisugar-server not answering"
+
+
 def watch(pisugar: PiSugar, config: dict, log, stop: threading.Event) -> None:
     guard = ShutdownGuard(config["shutdown_percent"], config["shutdown_volts"], config["readings"])
     # pisugar-server's own shutdown, under ours, in case this service is down.
     pisugar.ask(f"set_safe_shutdown_level {config['backstop_percent']}")
     pisugar.ask("set_safe_shutdown_delay 60")
     last_write: float | None = None
-    was_up, was_charging = None, None
+    was_state, was_charging = None, None
     while not stop.is_set():
-        reading, up = pisugar.reading()
-        if up != was_up:
-            log.info("pisugar-server answering" if up else "pisugar-server not answering")
-            was_up = up
+        reading, answered = pisugar.reading()
+        state = board_state(reading, answered)
+        if state != was_state:
+            log.info(state)
+            was_state = state
         if reading.charging is not None and reading.charging != was_charging:
             log.info("power", charging=reading.charging, percent=reading.percent, volts=reading.volts)
             was_charging = reading.charging
-        publish(reading, up, config["shutdown_percent"])
+        publish(reading, config["shutdown_percent"])
         if guard.update(reading):
             power_off(reading, log)
             return
-        if up and chrony_synced():
+        if reading.ok and chrony_synced():
             last_write = sync_rtc(pisugar, last_write, config["rtc_write_every"])
         stop.wait(config["poll"])
 
