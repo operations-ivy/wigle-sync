@@ -58,7 +58,14 @@ def test_at_home_with_kismet_stopped_and_charging():
 
 def test_unknowns():
     lines = eink.screen_lines(eink.Status(now=NOON))
-    assert lines == ["?  GPS ?", "Kismet stopped", "Heard -", "Battery ?", "Sync never", "12:34 ?"]
+    assert lines == ["?  GPS ?", "Kismet stopped", "Heard -", "Sync never", "12:34 ?"]
+
+
+def test_no_battery_reading_leaves_the_line_out():
+    # A PiSugar that isn't on I2C (scootypuffsr, 2026-11-17) never gives one.
+    lines = eink.screen_lines(driving(battery_percent=None, charging=None))
+    assert not any(line.startswith("Battery") for line in lines)
+    assert len(lines) == len(eink.screen_lines(driving())) - 1
 
 
 def test_a_source_in_error():
