@@ -56,6 +56,7 @@ from dataclasses import field
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
+from typing import NamedTuple
 
 from handheld_common import chrony_synced
 from handheld_common import init_logging
@@ -84,6 +85,7 @@ DEFAULTS = {
 WIDTH, HEIGHT = 250, 122  # the 2.13" panels, landscape
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+BOLD_SIZE, BODY_SIZE, SMALL_SIZE = 18, 14, 13  # points: the first line, the body, the last line
 
 
 @dataclass
@@ -412,8 +414,8 @@ BODY = [
     "....########....",
     "....##....##....",
 ]
-WAVES = {(1, 4), (2, 3), (3, 4), (1, 11), (2, 12), (3, 11)}
-ZED = {(0, 11), (0, 12), (0, 13), (1, 12), (2, 11), (2, 12), (2, 13)}
+WAVES = frozenset({(1, 4), (2, 3), (3, 4), (1, 11), (2, 12), (3, 11)})  # (row, column)
+ZED = frozenset({(0, 11), (0, 12), (0, 13), (1, 12), (2, 11), (2, 12), (2, 13)})
 # Each eye is 3 x 3, its top-left at row 7, columns 4 and 9.
 EYES = {
     "open": ["...", ".##", ".##"],
@@ -429,21 +431,30 @@ MOUTHS = {
     "frown": [".####.", "#....#"],
     "small": ["......", "..##.."],
 }
-FACES: dict[str, tuple[str, str, bool, bool]] = {  # eyes, mouth, waves, z
-    "stoked": ("happy", "smile", True, False),
-    "searching": ("side", "flat", True, False),
-    "sleepy": ("shut", "small", False, True),
-    "uh oh": ("open", "frown", False, False),
-    "low": ("cross", "frown", False, False),
+
+
+class Face(NamedTuple):
+    eyes: str
+    mouth: str
+    extra: frozenset[tuple[int, int]] = frozenset()  # WAVES, ZED or nothing
+
+
+FACES: dict[Mood, Face] = {
+    "stoked": Face("happy", "smile", WAVES),
+    "searching": Face("side", "flat", WAVES),
+    "sleepy": Face("shut", "small", ZED),
+    "uh oh": Face("open", "frown"),
+    "low": Face("cross", "frown"),
 }
 SCALE = 4
+SPRITE_PX = len(BODY) * SCALE  # the mascot's side on the panel
 
 
-def sprite(face: str) -> list[str]:
+def sprite(face: Mood) -> list[str]:
     """The mascot for a mood, as 16 rows of "#" (black) and "." (white)."""
-    eyes, mouth, waves, zed = FACES[face]
+    eyes, mouth, extra = FACES[face]
     grid = [list(row) for row in BODY]
-    for r, c in (WAVES if waves else set()) | (ZED if zed else set()):
+    for r, c in extra:
         grid[r][c] = "#"
     for col in (4, 9):
         for r, row in enumerate(EYES[eyes]):
@@ -453,7 +464,17 @@ def sprite(face: str) -> list[str]:
     return ["".join(row) for row in grid]
 
 
-def draw(lines: list[str], rotate: int = 0, face: str | None = None):
+def sprite_image(face: Mood):
+    """The mascot as a 1-bit image, SPRITE_PX square."""
+    from PIL import Image
+
+    rows = sprite(face)
+    image = Image.new("1", (len(rows[0]), len(rows)), 255)
+    image.putdata([0 if px == "#" else 255 for row in rows for px in row])
+    return image.resize((SPRITE_PX, SPRITE_PX), Image.NEAREST)
+
+
+def draw(lines: list[str], rotate: int = 0, face: Mood | None = None):
     """The lines as a 1-bit landscape image for the panel: the first line
     bold over a rule, the last small, and the mascot on the right with its
     mood under it."""
@@ -463,7 +484,8 @@ def draw(lines: list[str], rotate: int = 0, face: str | None = None):
 
     image = Image.new("1", (WIDTH, HEIGHT), 255)
     pen = ImageDraw.Draw(image)
-    bold, body, small = ImageFont.truetype(FONT_BOLD, 18), ImageFont.truetype(FONT, 14), ImageFont.truetype(FONT, 13)
+    bold = ImageFont.truetype(FONT_BOLD, BOLD_SIZE)
+    body, small = ImageFont.truetype(FONT, BODY_SIZE), ImageFont.truetype(FONT, SMALL_SIZE)
     y = 2
     for i, line in enumerate(lines):
         font = bold if i == 0 else small if i == len(lines) - 1 else body
@@ -472,14 +494,9 @@ def draw(lines: list[str], rotate: int = 0, face: str | None = None):
     if lines and lines[0] not in ("OFF", "DISPLAY STOPPED"):
         pen.line((0, 24, WIDTH, 24), fill=0)
     if face:
-        size = 16 * SCALE
-        left, top = WIDTH - size - 2, 28
-        for r, row in enumerate(sprite(face)):
-            for c, px in enumerate(row):
-                if px == "#":
-                    x0, y0 = left + c * SCALE, top + r * SCALE
-                    pen.rectangle((x0, y0, x0 + SCALE - 1, y0 + SCALE - 1), fill=0)
-        pen.text((left + size / 2, top + size + 2), face, font=small, fill=0, anchor="ma")
+        left, top = WIDTH - SPRITE_PX - 2, 28
+        image.paste(sprite_image(face), (left, top))
+        pen.text((left + SPRITE_PX / 2, top + SPRITE_PX + 2), face, font=small, fill=0, anchor="ma")
     return image.rotate(180) if rotate == 180 else image
 
 

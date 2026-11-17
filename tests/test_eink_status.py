@@ -149,16 +149,22 @@ def test_each_mood_has_its_own_face():
     assert len({tuple(eink.sprite(face)) for face in eink.FACES}) == len(eink.FACES)
 
 
-def test_last_sync_and_to_send(tmp_path):
+def test_last_sync(tmp_path):
     uploaded = tmp_path / "uploaded"
     assert eink.last_sync(uploaded) is None
     uploaded.mkdir()
     assert eink.last_sync(uploaded) is None
-    (uploaded / "Kismet-20261116-10-00-00-1.wiglecsv").write_text("x")
-    assert eink.last_sync(uploaded) == pytest.approx((uploaded / "Kismet-20261116-10-00-00-1.wiglecsv").stat().st_ctime)
+    session = uploaded / "Kismet-20261116-10-00-00-1.wiglecsv"
+    session.write_text("x")
+    assert eink.last_sync(uploaded) == pytest.approx(session.stat().st_ctime)
+
+
+def test_to_send(tmp_path):
     assert eink.to_send(tmp_path) == 0
     (tmp_path / "Kismet-20261116-12-00-00-1.wiglecsv").write_text("x")
     (tmp_path / "Kismet-20261116-12-00-00-1.kismet").write_text("x")
+    (tmp_path / "uploaded").mkdir()
+    (tmp_path / "uploaded" / "Kismet-20261116-10-00-00-1.wiglecsv").write_text("x")
     assert eink.to_send(tmp_path) == 1
 
 
@@ -278,9 +284,9 @@ def test_text_clears_the_mascot(status):
     image_font = pytest.importorskip("PIL.ImageFont")
     if not Path(eink.FONT).exists():
         pytest.skip("no DejaVu fonts")
-    body, small = image_font.truetype(eink.FONT, 14), image_font.truetype(eink.FONT, 13)
+    body, small = image_font.truetype(eink.FONT, eink.BODY_SIZE), image_font.truetype(eink.FONT, eink.SMALL_SIZE)
     lines = eink.screen_lines(status)
-    mascot_left = eink.WIDTH - 16 * eink.SCALE - 2
+    mascot_left = eink.WIDTH - eink.SPRITE_PX - 2
     for line in lines[1:-1]:
         assert 4 + body.getlength(line) < mascot_left, line
     assert 4 + small.getlength(lines[-1]) < mascot_left
