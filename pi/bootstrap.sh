@@ -131,8 +131,11 @@ systemctl start wifi-regdomain.service
 # Kismet itself is left alone: starting it at home would record a home session.
 
 bash "$SRC/setup-kismet-size-watch.sh"
-bash "$SRC/metrics/setup-metrics.sh"
+# The login first: pi-metrics (started by setup-metrics.sh), eink-status and
+# status-leds load it with LoadCredential, and a unit whose credential file is
+# missing fails to start, which stopped a first run on a fresh card (#65).
 bash "$SRC/setup-kismet-login.sh"
+bash "$SRC/metrics/setup-metrics.sh"
 if [[ $PROFILE == zero2w ]]; then
     bash "$SRC/zero2w/setup-zero2w.sh"
 else
