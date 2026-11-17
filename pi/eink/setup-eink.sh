@@ -28,7 +28,7 @@ declare -A SHA256=(
 LIB=/usr/local/lib/wigle-eink
 
 apt-get install -y -q --no-install-recommends python3 python3-pil python3-spidev python3-gpiozero python3-lgpio \
-    python3-structlog python3-yaml fonts-dejavu-core curl
+    python3-structlog python3-yaml fonts-dejavu-core fonts-terminus-otb curl
 
 config=/boot/firmware/config.txt
 if [[ -f $config ]] && ! grep -qx 'dtparam=spi=on' "$config"; then

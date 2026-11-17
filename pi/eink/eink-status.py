@@ -88,9 +88,13 @@ DEFAULTS = {
     "full_interval": 1800,
 }
 WIDTH, HEIGHT = 250, 122  # the 2.13" panels, landscape
-FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-BOLD_SIZE, BODY_SIZE, SMALL_SIZE = 18, 14, 13  # points: the first line, the body, the last line
+# Terminus, the Linux console's bitmap font (fonts-terminus-otb; the user,
+# 2026-11-17: retro): crisp on a 1-bit panel. Its sizes are the bitmap strikes
+# it has, in pixels. The mascot stays in DejaVu Sans Mono (FACE_FONT), which
+# has its characters.
+FONT = "/usr/share/fonts/opentype/terminus/terminus-normal.otb"
+FONT_BOLD = "/usr/share/fonts/opentype/terminus/terminus-bold.otb"
+BOLD_SIZE, BODY_SIZE, SMALL_SIZE = 16, 14, 12  # pixels: the first line, the body, the last line
 
 
 @dataclass
