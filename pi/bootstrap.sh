@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds a wardriving Pi from a fresh Raspberry Pi OS (or Kali) install: Kismet
-# on wlan_mon0 and a USB Bluetooth dongle (hci0; the onboard Bluetooth is turned
-# off) with gpsd, the home-wifi stop, the log size watch and the wigle-sync
+# on wlan_mon0 and Bluetooth on hci0 (a USB dongle with the onboard Bluetooth
+# turned off; on a zero2w the onboard Bluetooth itself) with gpsd, the home-wifi stop, the log size watch and the wigle-sync
 # user. Idempotent; re-run after changing pi/.
 #
 # On a Raspberry Pi Zero 2 W (zero2w/pi-profile, or PI_PROFILE in the
@@ -104,11 +104,20 @@ fi
 
 install -d -m 2770 -o "$KISMET_USER" -g kismet "$LOG_DIR"
 
-# The onboard Bluetooth is off (it shares a chip and antenna with wlan_host), so
-# the USB dongle is always hci0. Takes effect at the next boot.
+# Bluetooth is hci0. On brick69 the onboard Bluetooth is off (it shares a chip
+# and antenna with wlan_host), so the USB dongle is always hci0. The zero2w
+# handheld has no dongle: its onboard Bluetooth is hci0 (the user, 2026-11-17),
+# and a disable-bt from an earlier run comes out. Takes effect at the next boot.
 bt_reboot=0
 config=/boot/firmware/config.txt
-if [[ -f $config ]] && ! grep -qx "dtoverlay=disable-bt" "$config"; then
+if [[ $PROFILE == zero2w ]]; then
+    if [[ -f $config ]] && grep -qx "dtoverlay=disable-bt" "$config"; then
+        sed -i -e '/^# wigle-sync: onboard Bluetooth off; a USB dongle is hci0 (pi\/bootstrap.sh)$/d' \
+            -e '/^dtoverlay=disable-bt$/d' "$config"
+        echo "onboard Bluetooth turned back on in $config"
+        bt_reboot=1
+    fi
+elif [[ -f $config ]] && ! grep -qx "dtoverlay=disable-bt" "$config"; then
     printf '\n# wigle-sync: onboard Bluetooth off; a USB dongle is hci0 (pi/bootstrap.sh)\ndtoverlay=disable-bt\n' >> "$config"
     echo "onboard Bluetooth turned off in $config"
     bt_reboot=1
@@ -159,8 +168,12 @@ check "wlan_mon0 supports monitor mode" phy_supports wlan_mon0 monitor
 check "kismet_site.conf captures from wlan_mon0" grep -qx "source=wlan_mon0" /etc/kismet/kismet_site.conf
 check "kismet_site.conf captures from hci0" grep -q "^source=hci0" /etc/kismet/kismet_site.conf
 check "hci0 exists" test -e /sys/class/bluetooth/hci0
-# The dongle, not the onboard chip (hci_uart_bcm): needs disable-bt and a reboot.
-check "hci0 is a USB adapter" sh -c 'grep -qx "DRIVER=btusb" /sys/class/bluetooth/hci0/device/uevent'
+if [[ $PROFILE == zero2w ]]; then
+    check "hci0 is the onboard Bluetooth" sh -c 'grep -qx "DRIVER=hci_uart_bcm" /sys/class/bluetooth/hci0/device/uevent'
+else
+    # The dongle, not the onboard chip (hci_uart_bcm): needs disable-bt and a reboot.
+    check "hci0 is a USB adapter" sh -c 'grep -qx "DRIVER=btusb" /sys/class/bluetooth/hci0/device/uevent'
+fi
 bt_unblocked() { local r; for r in /sys/class/rfkill/rfkill*; do [[ $(<"$r/type") == bluetooth && $(<"$r/soft") == 1 ]] && return 1; done; return 0; }
 check "bluetooth not blocked" bt_unblocked
 # Kismet's packages grant file capabilities when setcap exists, else setuid root.
@@ -188,6 +201,6 @@ fi
 [[ ${EINK:-0} == 1 ]] && check "eink-status running" systemctl is-active eink-status.service
 check "gpsd sees a device" sh -c 'timeout 10 gpspipe -w -n 5 2>/dev/null | grep -q "\"class\":\"DEVICES\".*\"path\""'
 (( changed_links )) && echo "note: interface names changed; reboot to apply them"
-(( bt_reboot )) && echo "note: reboot to turn the onboard Bluetooth off (the dongle becomes hci0)"
+(( bt_reboot )) && echo "note: reboot for the Bluetooth change (hci0) to take effect"
 [[ $PROFILE == zero2w ]] && echo "note: the zero2w profile's swap, GPU, SPI and I2C changes take effect at the next boot"
 exit $status
