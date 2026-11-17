@@ -219,7 +219,9 @@ it). On brick69's Pi 3B+ the profile is `default` and nothing below runs.
   Unix socket only (its packaged defaults also open a web UI and a TCP API
   on every interface). `pisugar-watch.service` asks it every 30 s:
   `pi_battery_percent`, `pi_battery_volts`, `pi_battery_charging` and
-  `pi_pisugar_up` go to node-exporter's textfile directory (and so through
+  `pi_pisugar_up` (1 only while battery readings come back: pisugar-server
+  answers even when the board's I2C pins don't touch) go to node-exporter's
+  textfile directory (and so through
   vmagent), and after 4 polls in a row at or under 10 % (or 3.5 V) with
   nothing charging it, it powers the Pi off cleanly. pisugar-server's own
   safe shutdown is set at 5 % as a backstop, and `pisugar-poweroff` cuts the
