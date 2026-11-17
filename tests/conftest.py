@@ -10,6 +10,7 @@ from types import ModuleType
 PI = Path(__file__).resolve().parent.parent / "pi"
 # The handheld's scripts import handheld_common from beside them, as installed.
 sys.path.insert(0, str(PI))
+sys.path.insert(0, str(PI / "eink"))  # eink-status imports eink_art from beside it
 
 
 def load_script(name: str, path: Path) -> ModuleType:

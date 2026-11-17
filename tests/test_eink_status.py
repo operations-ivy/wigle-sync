@@ -31,6 +31,7 @@ DRIVING = eink.Status(
     to_send=2,
     clock_synced=True,
     now=NOON,
+    host="scootypuffsr",
 )
 
 
@@ -40,12 +41,13 @@ def driving(**changes):
 
 def test_on_the_road():
     assert eink.screen_lines(driving()) == [
-        "AWAY  GPS 3D 9 sat",
-        "BT ok   Wi-Fi ok",
-        "Heard 250 Wi-Fi  30 BT",
-        "Battery 78%",
-        "Sync 3h ago",
-        "12:34  2 to send",
+        "root@scootypuffsr:~#",
+        "$ away gps 3d 9 sat",
+        "$ kismet BT ok wifi ok",
+        "$ heard 250w 30bt",
+        "$ batt 78%",
+        "$ sync 3h ago",
+        "12:34 2 to send_",
     ]
 
 
@@ -53,29 +55,29 @@ def test_at_home_with_kismet_stopped_and_charging():
     lines = eink.screen_lines(
         driving(home=True, kismet_up=False, sources={}, recent=None, charging=True, gps_mode=1, satellites=0)
     )
-    assert lines[:4] == ["HOME  GPS no fix", "Kismet stopped", "Heard -", "Battery 78% +"]
+    assert lines[1:5] == ["$ home gps no fix", "$ kismet stopped", "$ heard -", "$ batt 78% +"]
 
 
 def test_unknowns():
     lines = eink.screen_lines(eink.Status(now=NOON))
-    assert lines == ["?  GPS ?", "Kismet stopped", "Heard -", "Sync never", "12:34 ?"]
+    assert lines == ["root@wigle:~#", "$ ? gps ?", "$ kismet stopped", "$ heard -", "$ sync never", "12:34 ?_"]
 
 
 def test_no_battery_reading_leaves_the_line_out():
     # A PiSugar that isn't on I2C (scootypuffsr, 2026-11-17) never gives one.
     lines = eink.screen_lines(driving(battery_percent=None, charging=None))
-    assert not any(line.startswith("Battery") for line in lines)
+    assert not any(line.startswith("$ batt") for line in lines)
     assert len(lines) == len(eink.screen_lines(driving())) - 1
 
 
 def test_a_source_in_error():
     lines = eink.screen_lines(driving(sources={"usb_bt": "off", "wlan_mon0": "ERR"}))
-    assert lines[1] == "BT off   Wi-Fi ERR"
-    assert eink.screen_lines(driving(sources={}))[1] == "Kismet: no sources"
+    assert lines[2] == "$ kismet BT off wifi ERR"
+    assert eink.screen_lines(driving(sources={}))[2] == "$ kismet: no sources"
 
 
 @pytest.mark.parametrize(
-    "mode, sats, text", [(3, 9, "GPS 3D 9 sat"), (2, 4, "GPS 2D 4 sat"), (1, 0, "GPS no fix"), (0, 0, "GPS ?")]
+    "mode, sats, text", [(3, 9, "gps 3d 9 sat"), (2, 4, "gps 2d 4 sat"), (1, 0, "gps no fix"), (0, 0, "gps ?")]
 )
 def test_gps_text(mode, sats, text):
     assert eink.gps_text(mode, sats) == text
@@ -87,7 +89,7 @@ def test_source_state_and_label():
     assert eink.source_state({"kismet.datasource.running": 0}) == "off"
     assert eink.source_label("usb_bt") == "BT"
     assert eink.source_label("hci0") == "BT"
-    assert eink.source_label("wlan_mon0") == "Wi-Fi"
+    assert eink.source_label("wlan_mon0") == "wifi"
 
 
 @pytest.mark.parametrize(
@@ -116,38 +118,41 @@ def test_ago(seconds, shown):
 
 
 def test_sync_text():
-    assert eink.sync_text(None, NOON, True) == "Sync never"
-    assert eink.sync_text(NOON.timestamp() - 5 * 3600, NOON, True) == "Sync 5h ago"
+    assert eink.sync_text(None, NOON, True) == "sync never"
+    assert eink.sync_text(NOON.timestamp() - 5 * 3600, NOON, True) == "sync 5h ago"
     # Without the real time, "ago" means nothing: the sync's own time instead.
-    assert eink.sync_text(datetime(2026, 11, 14, 21, 5).timestamp(), NOON, False) == "Sync 11-14 21:05"
+    assert eink.sync_text(datetime(2026, 11, 14, 21, 5).timestamp(), NOON, False) == "sync 11-14 21:05"
 
 
 def test_nothing_to_send_leaves_the_clock_alone():
-    assert eink.screen_lines(driving(to_send=0))[-1] == "12:34"
+    assert eink.screen_lines(driving(to_send=0))[-1] == "12:34_"
 
 
 @pytest.mark.parametrize(
     "changes, face",
     [
-        ({}, "stoked"),
-        ({"gps_mode": 1}, "searching"),
-        ({"home": True, "kismet_up": False, "sources": {}}, "sleepy"),
-        ({"home": None, "kismet_up": False, "sources": {}}, "sleepy"),
-        ({"home": False, "kismet_up": False, "sources": {}}, "uh oh"),
-        ({"sources": {"usb_bt": "ok", "wlan_mon0": "ERR"}}, "uh oh"),
-        ({"sources": {}}, "uh oh"),
-        ({"battery_percent": 20.0}, "low"),
-        ({"battery_percent": 20.0, "charging": True}, "stoked"),
-        ({"battery_percent": None}, "stoked"),
+        ({}, "cool"),
+        ({"recent": {"wifi": 350, "bluetooth": 60}}, "excited"),
+        ({"gps_mode": 1}, "look_l"),  # 12:34: the first five minutes of the turn
+        ({"gps_mode": 1, "now": datetime(2026, 11, 16, 12, 39)}, "look_r"),
+        ({"home": True, "kismet_up": False, "sources": {}, "to_send": 0}, "sleep"),
+        (
+            {"home": True, "kismet_up": False, "sources": {}, "to_send": 0, "now": datetime(2026, 11, 16, 12, 45)},
+            "sleep2",
+        ),
+        ({"home": None, "kismet_up": False, "sources": {}}, "sleep"),
+        ({"home": True, "kismet_up": False, "sources": {}}, "upload2"),  # 12:34: the third step
+        ({"home": True, "kismet_up": False, "sources": {}, "now": datetime(2026, 11, 16, 12, 36)}, "upload"),
+        ({"home": False, "kismet_up": False, "sources": {}}, "sad"),
+        ({"sources": {"usb_bt": "ok", "wlan_mon0": "ERR"}}, "broken"),
+        ({"sources": {}}, "broken"),
+        ({"battery_percent": 20.0}, "demotivated"),
+        ({"battery_percent": 20.0, "charging": True}, "cool"),
+        ({"battery_percent": None}, "cool"),
     ],
 )
-def test_mood(changes, face):
-    assert eink.mood(driving(**changes)) == face
-
-
-def test_each_mood_has_its_own_face():
-    assert set(eink.FACES) == set(eink.Mood.__args__)
-    assert len(set(eink.FACES.values())) == len(eink.FACES)
+def test_emotion(changes, face):
+    assert eink.emotion(driving(**changes)) == face
 
 
 def test_last_sync(tmp_path):
@@ -264,35 +269,40 @@ def test_credentials(tmp_path):
     assert eink.credentials(tmp_path / "missing") is None
 
 
-def test_draw_fits_the_panel():
+def needs_terminus():
     pytest.importorskip("PIL")
     if not Path(eink.FONT).exists():
-        pytest.skip("no DejaVu fonts")
-    image = eink.draw(eink.screen_lines(driving()), face="stoked")
+        pytest.skip("no Terminus font (fonts-terminus-otb)")
+
+
+def test_draw_fits_the_panel():
+    needs_terminus()
+    image = eink.draw(eink.screen_lines(driving()), face="cool")
     assert image.size == (eink.WIDTH, eink.HEIGHT)
     assert image.mode == "1"
+
+
+def shell_lines_clear_the_robot(lines):
+    """Every line under the title bar ends left of the robot's divider."""
+    needs_terminus()
+    from PIL import ImageFont
+
+    body = ImageFont.truetype(eink.FONT, eink.BODY_SIZE)
+    left = eink.BORDER + 1 + 5
+    divider = eink.WIDTH - 2 - eink.BORDER - eink.FACE_COLUMN
+    for line in lines[1:]:
+        assert left + body.getlength(line) < divider, line
 
 
 @pytest.mark.parametrize(
     "status",
     [
         driving(recent={"wifi": 1234, "bluetooth": 150}, to_send=12, satellites=12),
-        driving(sources={"usb_bt": "off", "wlan_mon0": "ERR"}, clock_synced=False, to_send=12),
+        driving(sources={"usb_bt": "off", "wlan_mon0": "ERR"}, clock_synced=False, to_send=12, charging=True),
     ],
 )
-def test_text_clears_the_mascot(status):
-    """The widest lines end left of the mascot (the top line runs over it)."""
-    image_font = pytest.importorskip("PIL.ImageFont")
-    if not Path(eink.FONT).exists():
-        pytest.skip("no DejaVu fonts")
-    body, small = image_font.truetype(eink.FONT, eink.BODY_SIZE), image_font.truetype(eink.FONT, eink.SMALL_SIZE)
-    lines = eink.screen_lines(status)
-    face_font = image_font.truetype(eink.FACE_FONT, eink.FACE_SIZE)
-    assert all(face_font.getlength(face) <= eink.FACE_COLUMN for face in eink.FACES.values())
-    mascot_left = eink.WIDTH - eink.FACE_COLUMN
-    for line in lines[1:-1]:
-        assert 4 + body.getlength(line) < mascot_left, line
-    assert 4 + small.getlength(lines[-1]) < mascot_left
+def test_text_clears_the_robot(status):
+    shell_lines_clear_the_robot(eink.screen_lines(status))
 
 
 # Every screen has the mascot (the user, 2026-11-17), errors included.
@@ -313,19 +323,24 @@ def test_a_collect_error_shows_an_error_screen_with_the_mascot():
     log = FakeLog()
     lines, face = eink.status_screen(broken, log)
     assert lines[:2] == ["ERROR", "KeyError"]
-    assert face == "uh oh"
+    assert face == "debug"
     assert log.errors == ["collect failed"]
 
 
 def test_a_good_poll_shows_the_status_and_its_mood():
     lines, face = eink.status_screen(driving, FakeLog())
     assert lines == eink.screen_lines(driving())
-    assert face == eink.mood(driving())
+    assert face == eink.emotion(driving())
 
 
 @pytest.mark.parametrize(
     ("reason", "crashed", "face"),
-    [(None, False, "sleepy"), ("battery 9%", False, "low"), (None, True, "uh oh"), ("battery 9%", True, "uh oh")],
+    [
+        (None, False, "sleep"),
+        ("battery 9%", False, "demotivated"),
+        (None, True, "broken"),
+        ("battery 9%", True, "broken"),
+    ],
 )
 def test_the_last_screen_keeps_a_mascot_that_fits_why(reason, crashed, face):
     assert eink.off_mood(reason, crashed) == face
@@ -345,12 +360,5 @@ def test_draw_needs_a_face():
         eink.off_lines(None, False, NOON, False),
     ],
 )
-def test_error_and_last_screens_clear_the_mascot(lines):
-    image_font = pytest.importorskip("PIL.ImageFont")
-    if not Path(eink.FONT).exists():
-        pytest.skip("no DejaVu fonts")
-    body, small = image_font.truetype(eink.FONT, eink.BODY_SIZE), image_font.truetype(eink.FONT, eink.SMALL_SIZE)
-    mascot_left = eink.WIDTH - eink.FACE_COLUMN
-    for line in lines[1:-1]:
-        assert 4 + body.getlength(line) < mascot_left, line
-    assert 4 + small.getlength(lines[-1]) < mascot_left
+def test_error_and_last_screens_clear_the_robot(lines):
+    shell_lines_clear_the_robot(lines)
