@@ -132,7 +132,9 @@ patched `realtek-rtl8188eus` DKMS driver).
 GPS is a u-blox 7 on USB, read through gpsd. Once home wifi has been up for 15
 minutes, a NetworkManager dispatcher script stops Kismet, and deletes the session
 if the Pi never left home (a boot in the driveway shouldn't upload the home
-network).
+network). Leaving home means 2 minutes off home wifi (`kismet-left-home`): a
+shorter drop at home is a blip and changes nothing, so it neither keeps a
+boot-at-home session nor re-arms a stop someone cancelled by hand.
 
 The Pi is switched off by pulling its power, and once (2026-10-08) that left the
 home Wi-Fi profile empty, so it never rejoined home Wi-Fi (#25).
@@ -239,7 +241,9 @@ it). On brick69's Pi 3B+ the profile is `default` and nothing below runs.
   don't run it flat. The PiSugar's RTC is the clock's fallback:
   `pisugar-rtc-load.service` sets the clock from it at boot when it's ahead
   of fake-hwclock's saved time (before chrony and Kismet), and once chrony
-  has the real time it's written back hourly.
+  has the real time it's written back hourly. Its journal output is capped
+  at 30 lines per 10 minutes: with the board's I2C unreachable it logs three
+  lines a second, which rotated the whole 64 MB journal every 40 minutes.
 
 Their settings (panel model `epd2in13_V2`/`V3`/`V4`, refresh cadence,
 shutdown thresholds, the PiSugar 2's LED variant) are in

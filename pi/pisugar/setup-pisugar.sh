@@ -88,6 +88,7 @@ install -d -m 755 /usr/local/lib/wigle-pisugar
 install -m 644 "$SRC/pisugar-watch.py" "$SRC/../handheld_common.py" /usr/local/lib/wigle-pisugar/
 install -m 644 "$SRC/pisugar-watch.service" "$SRC/pisugar-rtc-load.service" /etc/systemd/system/
 install -D -m 644 "$SRC/pisugar-poweroff-order.conf" /etc/systemd/system/pisugar-poweroff.service.d/order.conf
+install -D -m 644 "$SRC/pisugar-server-log-rate.conf" /etc/systemd/system/pisugar-server.service.d/log-rate.conf
 systemctl daemon-reload
 systemctl enable pisugar-server.service pisugar-poweroff.service pisugar-watch.service pisugar-rtc-load.service
 systemctl restart pisugar-server.service pisugar-watch.service
