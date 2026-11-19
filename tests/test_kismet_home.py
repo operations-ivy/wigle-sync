@@ -17,6 +17,7 @@ LEFT_HOME = ROOTFS / "usr/local/sbin/kismet-left-home"
 HOME_STOP = ROOTFS / "usr/local/sbin/kismet-home-stop"
 
 HOME_SSID = "home-net"
+STOP_RETRIES = 30  # kismet-home-stop: 30 tries 5 s apart for home wifi to come back
 
 STUBS = {
     # Active units live one per line in $STATE/active.
@@ -80,9 +81,12 @@ class Pi:
             "KISMET_LEFT_MARKER": str(self.marker),
         }
 
-    def at_home(self, home: bool = True):
+    def at_home(self, home: bool = True) -> None:
         flag = self.state / "home"
-        flag.touch() if home else flag.unlink(missing_ok=True)
+        if home:
+            flag.touch()
+        else:
+            flag.unlink(missing_ok=True)
 
     def run(self, script: Path, *args: str, **env: str) -> str:
         done = subprocess.run(["sh", str(script), *args], env=self.env | env,
@@ -101,16 +105,16 @@ class Pi:
     def calls(self) -> list[str]:
         return (self.state / "calls").read_text().splitlines()
 
-    def fire(self, unit: str):
+    def fire(self, unit: str) -> None:
         """The unit's timer elapses: systemd-run's transient timers then stop."""
         self.run(self.bin / "systemctl", "stop", f"{unit}.timer")
 
-    def forget_calls(self):
+    def forget_calls(self) -> None:
         (self.state / "calls").write_text("")
 
 
 @pytest.fixture
-def pi(tmp_path):
+def pi(tmp_path: Path) -> Pi:
     return Pi(tmp_path)
 
 
@@ -195,5 +199,5 @@ def test_home_stop_waits_out_a_blip(pi):
 def test_home_stop_gives_up_once_the_pi_has_left(pi):
     pi.at_home(False)
     pi.run(HOME_STOP)
-    assert pi.calls.count("sleep 5") == 30
+    assert pi.calls.count("sleep 5") == STOP_RETRIES
     assert "systemctl stop kismet.service" not in pi.calls
