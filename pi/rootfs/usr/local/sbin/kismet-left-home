@@ -1,0 +1,14 @@
+#!/bin/sh
+# Fired by the kismet-left-home timer (50-kismet-home) when home wifi has been
+# down for its grace period: the Pi has left home. Cancels a pending home stop,
+# marks this boot as a real outing (kismet-home-stop keeps its logs) and makes
+# sure kismet runs. Back on home wifi by now without an "up" event: nothing.
+SBIN=${KISMET_SBIN:-/usr/local/sbin}  # KISMET_* paths: for tests only
+LEFT_MARKER=${KISMET_LEFT_MARKER:-/run/kismet-left-home}  # read by kismet-home-stop
+
+"$SBIN/on-home-wifi" && exit 0
+
+systemctl stop kismet-home-stop.timer 2>/dev/null || true
+touch "$LEFT_MARKER"
+systemctl start kismet.service
+echo "off home wifi; kismet running, this boot is an outing"

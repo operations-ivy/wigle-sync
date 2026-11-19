@@ -1,11 +1,20 @@
 #!/bin/sh
 # Fired by the kismet-home-stop timer after home wifi has been up for the grace
-# period. Stops kismet and, if home wifi never dropped since boot (i.e. this was
+# period. Stops kismet and, if the Pi never left home since boot (i.e. this was
 # just a boot-at-home session, not a real drive), deletes that session's logs.
 LOGDIR=/var/log/kismet
-LEFT_MARKER=/run/kismet-left-home   # written by the dispatcher on home wifi "down"
+LEFT_MARKER=${KISMET_LEFT_MARKER:-/run/kismet-left-home}  # written by kismet-left-home
+SBIN=${KISMET_SBIN:-/usr/local/sbin}  # KISMET_* paths: for tests only
 
-/usr/local/sbin/on-home-wifi || exit 0
+# Off home wifi right now: wait out a blip (the dispatcher's 120 s grace), so
+# a drop just as this fires doesn't leave kismet running at home. Still off
+# after that: the Pi has left, and kismet-left-home has taken over.
+tries=0
+until "$SBIN/on-home-wifi"; do
+  tries=$((tries + 1))
+  [ "$tries" -gt 30 ] && exit 0
+  sleep 5
+done
 
 pid=$(systemctl show -p MainPID --value kismet.service)
 bases=""
@@ -18,7 +27,7 @@ fi
 systemctl stop kismet.service
 
 if [ -e "$LEFT_MARKER" ]; then
-  echo "home wifi dropped since boot; keeping session logs"
+  echo "left home since boot; keeping session logs"
   exit 0
 fi
 for b in $bases; do
