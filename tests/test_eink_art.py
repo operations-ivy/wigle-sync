@@ -90,7 +90,6 @@ def test_each_face_fits_its_column(face_font, emotion):
 def test_a_face_is_drawn_centred(canvas, face_font):
     img, pen = canvas
     art.draw_face(pen, "cool", 200, 60, face_font)
-    xs = [x for x in range(W) for y in range(H) if img.getpixel((x, y)) == 0]
-    ys = [y for x in range(W) for y in range(H) if img.getpixel((x, y)) == 0]
+    xs, ys = zip(*[(x, y) for x in range(W) for y in range(H) if img.getpixel((x, y)) == 0])
     assert abs((min(xs) + max(xs)) / 2 - 200) <= 3
     assert abs((min(ys) + max(ys)) / 2 - 60) <= 4

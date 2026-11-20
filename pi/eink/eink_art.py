@@ -5,12 +5,14 @@ a panel."""
 
 from __future__ import annotations
 
+import functools
 from typing import get_args
 from typing import Literal
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from PIL.ImageDraw import ImageDraw
+    from PIL.ImageFont import FreeTypeFont
 
 BORDER = 11  # px: the band round the edge kept for the corner chips
 CHIP = 11  # px: a corner chip, pins included
@@ -74,13 +76,17 @@ FACES: dict[Emotion, str] = {
 }
 
 
-def draw_face(pen: ImageDraw, emotion: Emotion, centre_x: int, middle_y: int, font=None) -> None:
-    """The face for an emotion, centred on (centre_x, middle_y)."""
-    if font is None:
-        from PIL import ImageFont
+@functools.cache
+def face_font() -> FreeTypeFont:
+    """The face's font, loaded once."""
+    from PIL import ImageFont
 
-        font = ImageFont.truetype(FACE_FONT, FACE_SIZE)
-    pen.text((centre_x, middle_y), FACES[emotion], font=font, fill=0, anchor="mm")
+    return ImageFont.truetype(FACE_FONT, FACE_SIZE)
+
+
+def draw_face(pen: ImageDraw, emotion: Emotion, centre_x: int, middle_y: int, font: FreeTypeFont | None = None) -> None:
+    """The face for an emotion, centred on (centre_x, middle_y)."""
+    pen.text((centre_x, middle_y), FACES[emotion], font=font or face_font(), fill=0, anchor="mm")
 
 
 COLUMN = 70  # px: the face's column on the right of the screen, divider included
