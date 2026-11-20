@@ -1,4 +1,4 @@
-"""The e-ink screen's art: a circuit-board border and the mascot, pwnagotchi's
+"""The e-ink screen's art: a chip in each corner and the mascot, pwnagotchi's
 stock text face for each of its 25 emotions (the user, 2026-11-20: they replace
 our sunglasses robot). Pure drawing on a PIL ImageDraw, so it's tested without
 a panel."""
@@ -12,69 +12,26 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from PIL.ImageDraw import ImageDraw
 
-BORDER = 11  # px: the circuit border's band round the edge (its inner pads reach 10 px in)
-CHIP = 11  # px: the chip in each corner
+BORDER = 11  # px: the band round the edge kept for the corner chips
+CHIP = 11  # px: a corner chip, pins included
 
 
-def _via(pen: ImageDraw, x: int, y: int) -> None:
-    pen.ellipse((x - 2, y - 2, x + 2, y + 2), fill=0)
-    pen.point((x, y), fill=255)
-
-
-def _pad(pen: ImageDraw, x: int, y: int) -> None:
-    pen.rectangle((x - 1, y - 1, x + 1, y + 1), fill=0)
-
-
-def _side_runs(length: int) -> list[tuple[int, int, int]]:
-    """Trace runs along a side, as (lane, start, end) in px along it, clear of
-    the corner chips. Lane 4 runs drop out to the edge trace; lane 7 runs, set
-    between them, bend in to a pad. Fixed, so every screen has the same board."""
-    runs, u, n = [], CHIP + 4, 0
-    while u + 14 < length - CHIP - 4:
-        span = (14, 9, 20, 11, 16, 8, 12)[n % 7]
-        runs.append((4, u, min(u + span, length - CHIP - 6)))
-        if u + span + 13 < length - CHIP - 4:
-            runs.append((7, u + span // 2 + 1, u + span // 2 + 7))
-        u += span + 8
-        n += 1
-    return runs
-
-
-def circuit_border(pen: ImageDraw, width: int, height: int) -> None:
-    """A circuit-board border in the outer BORDER px: an edge trace, two lanes
-    of short traces with vias and pads, and a chip in each corner, its pin-1
-    notch turned to its corner."""
-    sides = {  # (u along the side, v in from its edge) to (x, y), and the side's length
-        "top": (lambda u, v: (u, v), width),
-        "right": (lambda u, v: (width - 1 - v, u), height),
-        "bottom": (lambda u, v: (width - 1 - u, height - 1 - v), width),
-        "left": (lambda u, v: (v, height - 1 - u), height),
-    }
-    for at, length in sides.values():
-        pen.line([at(CHIP, 1), at(length - 1 - CHIP, 1)], fill=0)  # the edge trace, chip to chip
-        for lane, a, b in _side_runs(length):
-            _via(pen, *at(a, lane))
-            pen.line([at(a + 3, lane), at(b, lane)], fill=0)
-            if lane == 4:  # out to the edge trace
-                pen.line([at(b, lane), at(b, 1)], fill=0)
-            else:  # in on a 45, to a pad
-                pen.line([at(b, lane), at(b + 2, lane + 2)], fill=0)
-                _pad(pen, *at(b + 3, lane + 2))
-    corners = {  # each corner's (x, y) from its own corner, mirrored
-        "top left": lambda x, y: (x, y),
-        "top right": lambda x, y: (width - 1 - x, y),
-        "bottom right": lambda x, y: (width - 1 - x, height - 1 - y),
-        "bottom left": lambda x, y: (x, height - 1 - y),
-    }
-    for at in corners.values():
+def corner_chips(pen: ImageDraw, width: int, height: int) -> None:
+    """A chip in each corner, in the outer BORDER px, its pin-1 notch turned to
+    its corner (the user, 2026-11-20: the chips without the circuit traces)."""
+    corners = (  # each corner's (x, y) from its own corner, mirrored
+        lambda x, y: (x, y),
+        lambda x, y: (width - 1 - x, y),
+        lambda x, y: (width - 1 - x, height - 1 - y),
+        lambda x, y: (x, height - 1 - y),
+    )
+    for at in corners:
         xs, ys = zip(at(2, 2), at(8, 8))  # the body, whichever way the corner mirrors it
         pen.rectangle((min(xs), min(ys), max(xs), max(ys)), fill=0)
         pen.point(at(3, 3), fill=255)  # pin 1, towards the corner
-        for k in (3, 5, 7):  # pins on its two inner sides, out to the edge traces
-            pen.line([at(9, k), at(CHIP, k)], fill=0)
-            pen.line([at(k, 9), at(k, CHIP)], fill=0)
-        pen.line([at(CHIP, 1), at(CHIP, 3)], fill=0)  # the edge traces meet its outer pins
-        pen.line([at(1, CHIP), at(3, CHIP)], fill=0)
+        for k in (3, 5, 7):  # pins on its two inner sides
+            pen.line([at(9, k), at(CHIP - 1, k)], fill=0)
+            pen.line([at(k, 9), at(k, CHIP - 1)], fill=0)
 
 
 FACE_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"  # pwnagotchi's face font

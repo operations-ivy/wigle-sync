@@ -216,7 +216,7 @@ it). On brick69's Pi 3B+ the profile is `default` and nothing below runs.
   GPS fix, Kismet's sources, devices heard in the last minute, the battery,
   the last sync (when wigle-sync last moved a session into `uploaded/`), the
   time and how many sessions wait to be sent, as a root shell in Terminus
-  inside a circuit-board border, with pwnagotchi's stock text face summing
+  with a chip in each corner and pwnagotchi's stock text face summing
   it up in one of its 25 emotions (cool, looking left and right,
   sleep, upload, broken, sad, demotivated, debug...; `pi/eink/eink_art.py`).
   It asks the

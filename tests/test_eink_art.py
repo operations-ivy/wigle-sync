@@ -1,4 +1,4 @@
-"""pi/eink/eink_art.py: the circuit border and pwnagotchi's stock faces."""
+"""pi/eink/eink_art.py: the corner chips and pwnagotchi's stock faces."""
 
 from __future__ import annotations
 
@@ -38,19 +38,25 @@ def canvas():
     return img, draw.Draw(img)
 
 
-def test_the_border_stays_in_its_band(canvas):
+def test_the_chips_stay_in_the_band(canvas):
     img, pen = canvas
-    art.circuit_border(pen, W, H)
+    art.corner_chips(pen, W, H)
     b = art.BORDER
     inside = [img.getpixel((x, y)) for x in range(b, W - b) for y in range(b, H - b)]
-    assert all(inside), "the border reaches into the screen"
-    band = [img.getpixel((x, y)) for x in range(W) for y in range(H) if not (b <= x < W - b and b <= y < H - b)]
-    assert band.count(0) > len(band) // 6, "too sparse to read as a circuit"
+    assert all(inside), "a chip reaches into the screen"
+
+
+def test_only_the_corners_have_anything(canvas):
+    img, pen = canvas
+    art.corner_chips(pen, W, H)
+    c = art.CHIP
+    black = [(x, y) for x in range(W) for y in range(H) if img.getpixel((x, y)) == 0]
+    assert all((x < c or x >= W - c) and (y < c or y >= H - c) for x, y in black), "no traces between the chips"
 
 
 def test_a_chip_in_each_corner_turned_to_it(canvas):
     img, pen = canvas
-    art.circuit_border(pen, W, H)
+    art.corner_chips(pen, W, H)
     c = art.CHIP
 
     def corner(x0, y0, flip_x, flip_y):
