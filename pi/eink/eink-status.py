@@ -168,6 +168,23 @@ def source_label(name: str) -> str:
     return "bt" if "bt" in name.lower() or name.startswith("hci") else "wifi"
 
 
+def sources_text(sources: dict[str, str]) -> str:
+    """Kismet's sources and their states, bt first. Two Wi-Fi radios
+    (WIFI_SPLIT: wlan_mon1 on 2.4 GHz, wlan_mon0 on 5 GHz) show as one
+    "wifi ok" while both are, else each one that isn't, by band ("2g ERR"),
+    so the line stays clear of the face."""
+    bt = [f"bt {state}" for name, state in sorted(sources.items()) if source_label(name) == "bt"]
+    wifi = {name: state for name, state in sorted(sources.items()) if source_label(name) == "wifi"}
+    if len(wifi) == 1:
+        shown = [f"wifi {state}" for state in wifi.values()]
+    elif all(state == "ok" for state in wifi.values()):
+        shown = ["wifi ok"] if wifi else []
+    else:
+        band = {"wlan_mon1": "2g"}
+        shown = [f"{band.get(name, '5g')} {state}" for name, state in wifi.items() if state != "ok"]
+    return " ".join([*bt, *shown])
+
+
 def gps_text(mode: int, satellites: int) -> str:
     """gpsd's fix as shown: "gps 3d 9 sat", "gps no fix", or "gps ?"."""
     if mode in (2, 3):
@@ -234,7 +251,7 @@ def screen_lines(s: Status) -> list[str]:
     elif not s.sources:
         sources = "$ kismet: no sources"
     else:
-        sources = "$ kismet " + " ".join(f"{source_label(n)} {state}" for n, state in sorted(s.sources.items()))
+        sources = f"$ kismet {sources_text(s.sources)}"
     if s.recent is None:
         heard = "$ heard -"
     else:

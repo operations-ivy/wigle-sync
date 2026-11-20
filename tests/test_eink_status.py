@@ -78,6 +78,20 @@ def test_a_source_in_error():
 
 
 @pytest.mark.parametrize(
+    "sources, text",
+    [
+        ({"usb_bt": "ok", "wlan_mon0": "ok", "wlan_mon1": "ok"}, "bt ok wifi ok"),
+        ({"usb_bt": "ok", "wlan_mon0": "ok", "wlan_mon1": "ERR"}, "bt ok 2g ERR"),
+        ({"usb_bt": "ok", "wlan_mon0": "off", "wlan_mon1": "ok"}, "bt ok 5g off"),
+        ({"usb_bt": "off", "wlan_mon0": "ERR", "wlan_mon1": "off"}, "bt off 5g ERR 2g off"),
+        ({"usb_bt": "ok"}, "bt ok"),
+    ],
+)
+def test_two_wifi_radios_show_as_one_while_both_are_ok(sources, text):
+    assert eink.sources_text(sources) == text
+
+
+@pytest.mark.parametrize(
     "mode, sats, text", [(3, 9, "gps 3d 9 sat"), (2, 4, "gps 2d 4 sat"), (1, 0, "gps no fix"), (0, 0, "gps ?")]
 )
 def test_gps_text(mode, sats, text):

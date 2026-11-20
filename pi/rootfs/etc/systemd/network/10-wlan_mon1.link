@@ -1,0 +1,9 @@
+# The 2.4 GHz capture radio beside wlan_mon0 (WIFI_SPLIT=1 in the settings):
+# an RTL8188EUS (in-kernel rtl8xxxu), matched by USB ID so swapping the dongle
+# keeps the name that kismet_wifi.conf uses (source=wlan_mon1). Another model
+# needs its own .link: a [Match] section's properties must all match.
+[Match]
+Property=ID_VENDOR_ID=0bda ID_MODEL_ID=8179
+
+[Link]
+Name=wlan_mon1
