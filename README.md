@@ -216,8 +216,8 @@ it). On brick69's Pi 3B+ the profile is `default` and nothing below runs.
   GPS fix, Kismet's sources, devices heard in the last minute, the battery,
   the last sync (when wigle-sync last moved a session into `uploaded/`), the
   time and how many sessions wait to be sent, as a root shell in Terminus
-  inside a circuit-board border, with an original sunglasses robot that sums
-  it up in one of pwnagotchi's 25 emotions (cool, looking left and right,
+  inside a circuit-board border, with pwnagotchi's stock text face summing
+  it up in one of its 25 emotions (cool, looking left and right,
   sleep, upload, broken, sad, demotivated, debug...; `pi/eink/eink_art.py`).
   It asks the
   same places pi-metrics does (Kismet's REST API, gpsd, `on-home-wifi`) and redraws only when the text changes: a partial

@@ -285,8 +285,8 @@ def test_draw_fits_the_panel(terminus):
     assert image.mode == "1"
 
 
-def assert_clear_of_the_robot(lines, body):
-    """Every line under the title bar ends left of the robot's divider."""
+def assert_clear_of_the_face(lines, body):
+    """Every line under the title bar ends left of the face's divider."""
     left = eink.BORDER + 1 + 5
     divider = eink.WIDTH - 2 - eink.BORDER - eink.FACE_COLUMN
     for line in lines[1:]:
@@ -300,8 +300,8 @@ def assert_clear_of_the_robot(lines, body):
         driving(sources={"usb_bt": "off", "wlan_mon0": "ERR"}, clock_synced=False, to_send=12, charging=True),
     ],
 )
-def test_text_clears_the_robot(terminus, status):
-    assert_clear_of_the_robot(eink.screen_lines(status), terminus)
+def test_text_clears_the_face(terminus, status):
+    assert_clear_of_the_face(eink.screen_lines(status), terminus)
 
 
 # Every screen has the mascot (the user, 2026-11-17), errors included.
@@ -359,5 +359,5 @@ def test_draw_needs_a_face():
         eink.off_lines(None, False, NOON, False),
     ],
 )
-def test_error_and_last_screens_clear_the_robot(terminus, lines):
-    assert_clear_of_the_robot(lines, terminus)
+def test_error_and_last_screens_clear_the_face(terminus, lines):
+    assert_clear_of_the_face(lines, terminus)
