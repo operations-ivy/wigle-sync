@@ -2,10 +2,10 @@
 """The wardriver's status on its e-ink display (a Waveshare 2.13", as on a
 pwnagotchi): what matters on the road, readable at a glance.
 
-    +-[circuit-board border, a chip in each corner]-+
+    +-[a chip in each corner]-----------------------+
     | root@scootypuffsr:~#        (inverted bar)     |
-    | $ away gps 3d 9 sat          |   [robot in     |
-    | $ kismet BT ok wifi ok       |   sunglasses]   |
+    | $ away gps 3d 9 sat          |                 |
+    | $ kismet BT ok wifi ok       |     (⌐■_■)      |
     | $ heard 245w 30bt            |                 |
     | $ sync 3h ago                |      cool       |
     | 14:32 2 to send_             |                 |
@@ -26,9 +26,9 @@ pwnagotchi): what matters on the road, readable at a glance.
 - The time, with "?" until chrony has the real time, and how many sessions
   are waiting for wigle-sync (.wiglecsv files still in the capture directory).
 - The look (the user, 2026-11-17): a root shell in Terminus, the Linux
-  console's bitmap font, inside a circuit-board border (eink_art.py).
-- The mascot on the right, an original sunglasses robot with one sprite for
-  each of pwnagotchi's 25 face names (eink_art.py), picked by emotion():
+  console's bitmap font, with a chip in each corner (eink_art.py).
+- The mascot on the right, pwnagotchi's stock text face for each of its 25
+  emotions (eink_art.py; the user, 2026-11-20), picked by emotion():
   cool capturing with a fix (excited when it hears a lot), looking left and
   right while it waits for one, sleep at home with Kismet stopped (upload
   while sessions wait to go), broken with a source down, sad with Kismet
@@ -70,9 +70,9 @@ from pathlib import Path
 from typing import Literal
 
 from eink_art import BORDER
-from eink_art import circuit_border
 from eink_art import COLUMN
-from eink_art import draw_robot
+from eink_art import corner_chips
+from eink_art import draw_face
 from eink_art import Emotion
 from eink_art import label
 from handheld_common import chrony_synced
@@ -204,7 +204,7 @@ UPLOADING: tuple[Emotion, Emotion, Emotion] = ("upload", "upload1", "upload2")
 
 
 def emotion(s: Status) -> Emotion:
-    """The robot's emotion, from the worst thing on the screen up: looking
+    """The mascot's emotion, from the worst thing on the screen up: looking
     left and right while it waits for a fix, sleep and sleep2 at home, the
     upload arrows stepping while sessions wait to go."""
     turn = s.now.minute // 5 % 2  # which of a pair, for five minutes
@@ -261,7 +261,7 @@ def off_lines(reason: str | None, shutting_down: bool, now: datetime, clock_sync
 
 
 def off_mood(reason: str | None, crashed: bool) -> Emotion:
-    """The robot left on the last screen. `reason` is pisugar-watch's, only
+    """The mascot left on the last screen. `reason` is pisugar-watch's, only
     ever a low battery."""
     if crashed:
         return "broken"
@@ -275,7 +275,7 @@ def error_lines(error: Exception, now: datetime, clock_synced: bool) -> list[str
 
 
 def status_screen(get_status: Callable[[], Status], log) -> tuple[list[str], Emotion]:
-    """The lines and the robot's emotion for this poll: an ERROR screen (debug) when
+    """The lines and the mascot's emotion for this poll: an ERROR screen (debug) when
     collecting fails, so the mascot stays and the loop keeps going."""
     try:
         status = get_status()
@@ -453,23 +453,23 @@ def collect(login: tuple[str, str] | None) -> Status:
     )
 
 
-FACE_COLUMN = COLUMN  # px on the right for the robot and its label
+FACE_COLUMN = COLUMN  # px on the right for the face and its label
 TITLE_BAR = 15  # px: the inverted title bar's height
 ROW = 15  # px between shell lines, when they fit (less with a battery line)
 
 
 def draw(lines: list[str], face: Emotion, rotate: int = 0):
-    """The lines as a 1-bit landscape image for the panel, inside the circuit
-    border: the first line in an inverted title bar, the rest below it, and
-    the robot right of a divider with its emotion under it. Every screen has
-    the robot."""
+    """The lines as a 1-bit landscape image for the panel, inside the corner
+    chips: the first line in an inverted title bar, the rest below it, and
+    the face right of a divider with its emotion under it. Every screen has
+    the face."""
     from PIL import Image
     from PIL import ImageDraw
     from PIL import ImageFont
 
     image = Image.new("1", (WIDTH, HEIGHT), 255)
     pen = ImageDraw.Draw(image)
-    circuit_border(pen, WIDTH, HEIGHT)
+    corner_chips(pen, WIDTH, HEIGHT)
     title, body = ImageFont.truetype(FONT_BOLD, TITLE_SIZE), ImageFont.truetype(FONT, BODY_SIZE)
     left, right, top, bottom = BORDER + 1, WIDTH - 2 - BORDER, BORDER + 1, HEIGHT - 2 - BORDER
     pen.rectangle((left, top, right, top + TITLE_BAR - 1), fill=0)
@@ -482,8 +482,9 @@ def draw(lines: list[str], face: Emotion, rotate: int = 0):
     divider = right - FACE_COLUMN
     pen.line((divider, below, divider, bottom - 1), fill=0)
     middle = (divider + right) // 2 + 1
-    draw_robot(pen, face, middle, below + 1)
-    pen.text((middle, bottom - BODY_SIZE - 1), label(face), font=body, fill=0, anchor="ma")
+    label_top = bottom - BODY_SIZE - 1
+    draw_face(pen, face, middle, (below + label_top) // 2)
+    pen.text((middle, label_top), label(face), font=body, fill=0, anchor="ma")
     return image.rotate(180) if rotate == 180 else image
 
 
@@ -525,7 +526,7 @@ def main() -> None:
     try:
         while not stop.is_set():
             lines, face = status_screen(lambda: collect(credentials(creds)), log)
-            # The robot wakes up with the display: the first good screen is
+            # The mascot wakes up with the display: the first good screen is
             # awake (an ERROR screen keeps its debug, and the next one wakes).
             if first and face != "debug":
                 face, first = "awake", False
