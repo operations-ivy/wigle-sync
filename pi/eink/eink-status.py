@@ -1,39 +1,36 @@
 #!/usr/bin/env python3
 """The wardriver's status on its e-ink display (a Waveshare 2.13", as on a
-pwnagotchi): what matters on the road, readable at a glance.
+pwnagotchi): what matters on the road, readable at a glance. Three things
+(the user, 2026-11-20): the time, the GPS fix (the one thing to wait for),
+and anything wrong with what wardriving needs.
 
-    +-[a chip in each corner]-----------------------+
-    | root@scootypuffsr:~#        (inverted bar)     |
-    | $ away gps 3d 9 sat          |                 |
-    | $ kismet BT ok wifi ok       |     (⌐■_■)      |
-    | $ heard 245w 30bt            |                 |
-    | $ sync 3h ago                |      cool       |
-    | 14:32 2 to send_             |                 |
-    +-----------------------------------------------+
+    +-[a chip in each corner]---------------------------+
+    | ####[ 14:32 ]########### +--------------------+ |
+    | GPS 3D 9 SAT     .   .   |       (⌐■_■)       | |
+    | NO ERRORS    .   .   .   |       [cool]       | |
+    |  .   .   .   .   .   .   +--------------------+ |
+    +---------------------------------------------------+
 
-- Home or away: on the home Wi-Fi or not (on-home-wifi, as pi-metrics uses).
+- The time, larger, with "?" until chrony has the real time.
 - GPS: gpsd's fix (none, 2D, 3D) and the satellites in it.
-- Kismet's capture sources: ok, ERR (in error), off; or "Kismet stopped"
-  (at home it stops 15 minutes after joining the Wi-Fi).
-- Devices Kismet heard in the last minute, by Wi-Fi and Bluetooth, rounded
-  so the screen doesn't change on every count.
-- The PiSugar's battery from pisugar-watch's state file ("+" while charging),
-  left out while there's no reading (a board that isn't on I2C, as on
-  scootypuffsr until it's re-seated), so it comes back by itself.
-- The last sync: when wigle-sync last moved a session into uploaded/ (each
-  file's ctime there; the Pi is home, with the real time, when that happens),
-  "Nh ago" with the real time, the date and time without it.
-- The time, with "?" until chrony has the real time, and how many sessions
-  are waiting for wigle-sync (.wiglecsv files still in the capture directory).
-- The look (the user, 2026-11-17): a root shell in Terminus, the Linux
-  console's bitmap font, with a chip in each corner (eink_art.py).
-- The mascot on the right, pwnagotchi's stock text face for each of its 25
-  emotions (eink_art.py; the user, 2026-11-20), picked by emotion():
-  cool capturing with a fix (excited when it hears a lot), looking left and
-  right while it waits for one, sleep at home with Kismet stopped (upload
-  while sessions wait to go), broken with a source down, sad with Kismet
-  stopped away from home, demotivated on a low battery, awake on the first
-  screen. Every screen has one: an error reading Kismet, gpsd or the battery
+- Errors, or NO ERRORS: Kismet down away from home (at home it stops 15
+  minutes after joining the Wi-Fi), no capture sources, a source in error
+  or off (BT, WIFI; two Wi-Fi radios by band, 2G and 5G), and the PiSugar's
+  battery at LOW_BATTERY or under while not charging (pisugar-watch's state
+  file). On two lines when they don't fit on one.
+- The look (the user, 2026-11-20): brick9000's board in black and white.
+  VT323, its font and the games menu's (vendored, OFL), bold, not
+  stick-like (bold_text); the time white on a black bar with scanlines; a
+  dot grid for the board's; the face in a panel with the board's bracket
+  corners, its emotion in a tab; a chip in each corner (eink_art.py).
+- The mascot on the right, pwnagotchi's stock text faces (eink_art.py),
+  each meaning one thing (the user, 2026-11-20), picked by emotion(). The
+  wait for a fix reads left to right: (☉_☉ ) no satellites seen yet,
+  ( ⚆_⚆) some seen, ( ◕‿◕) a 2D fix, then cool with a 3D fix (excited
+  when it hears a lot). lonely: gpsd not answering. broken: a source down.
+  sad: Kismet down away from home. demotivated: a low battery. At home with
+  Kismet stopped: sleep, or upload while sessions wait to go. awake: the
+  first screen. Every screen has one: an error reading Kismet, gpsd or the battery
   shows an ERROR screen with debug, and the last screen, left while the Pi
   is off, sleeps, is demotivated after a low-battery shutdown, or broken if
   the display crashed.
@@ -84,9 +81,9 @@ Refresh = Literal["full", "partial"]
 CONFIG = Path(os.environ.get("HANDHELD_CONFIG", "/etc/wigle-pi/handheld.yaml"))
 STATE_DIR = Path(os.environ.get("WIGLE_PI_STATE", "/run/wigle-pi"))
 KISMET = "http://127.0.0.1:2501"
+WIFI_BANDS = {"wlan_mon0": "5G", "wlan_mon1": "2G"}  # WIFI_SPLIT's radios, by band
 # Where Kismet logs and wigle-sync collects (its PI_REMOTE_DIR, PI_ARCHIVE_DIR).
 CAPTURE_DIR = Path(os.environ.get("KISMET_LOG_DIR", "/var/log/kismet"))
-UPLOADED_DIR = CAPTURE_DIR / "uploaded"
 LOW_BATTERY = 20  # percent: the mascot is demotivated at or under this, not charging
 EXCITED = 400  # devices heard in the last minute: cool to excited (brick69: median 251, max 601)
 RECENT = 60  # seconds: "heard in the last minute", as pi-metrics counts it
@@ -101,12 +98,15 @@ DEFAULTS = {
     "full_interval": 1800,
 }
 WIDTH, HEIGHT = 250, 122  # the 2.13" panels, landscape
-# Terminus, the Linux console's bitmap font (fonts-terminus-otb; the user,
-# 2026-11-17: retro): crisp on a 1-bit panel. Sizes are its bitmap strikes, in
-# pixels; at 12 a character is 6 px wide.
-FONT = "/usr/share/fonts/opentype/terminus/terminus-normal.otb"
-FONT_BOLD = "/usr/share/fonts/opentype/terminus/terminus-bold.otb"
-TITLE_SIZE, BODY_SIZE = 12, 12  # pixels: the title bar, everything else
+# VT323 for the text (the user, 2026-11-20: brick9000's board and games-menu
+# font), drawn bold; Terminus, a bitmap font, for the face's label, which
+# fits its column at 12 (6 px a character).
+FONT = str(Path(__file__).parent / "fonts" / "VT323-Regular.ttf")  # here and as setup-eink.sh installs it
+BIG, TEXT = 44, 20  # pixels: the time, the other lines
+WEIGHT = 1  # px each glyph is thickened by, and the space added after it
+TEXT_CHARS = 15  # characters on a TEXT line left of the face (8 px each, 9 in bold)
+LABEL_FONT = "/usr/share/fonts/opentype/terminus/terminus-normal.otb"
+LABEL_SIZE = 12  # pixels: the face's label, in Terminus to fit its column
 
 
 @dataclass
@@ -115,17 +115,16 @@ class Status:
 
     home: bool | None = None
     gps_mode: int = 0  # gpsd: 0 unknown, 1 no fix, 2 2D, 3 3D
-    satellites: int = 0
+    satellites: int = 0  # used in the fix
+    seen: int = 0  # in view, used or not
     kismet_up: bool = False
     sources: dict[str, str] = field(default_factory=dict)  # name: ok, ERR, off
     recent: dict[str, int] | None = None  # wifi, bluetooth
     battery_percent: float | None = None
     charging: bool | None = None
-    last_sync: float | None = None  # epoch seconds
-    to_send: int = 0  # sessions waiting for wigle-sync
+    to_send: int = 0  # sessions waiting for wigle-sync (the mascot uploads)
     clock_synced: bool = False
     now: datetime = field(default_factory=datetime.now)
-    host: str = "wigle"  # the prompt's hostname
 
 
 def load_config(path: Path = CONFIG) -> dict:
@@ -145,17 +144,6 @@ def load_config(path: Path = CONFIG) -> dict:
     return config
 
 
-def rounded(n: int) -> str:
-    """Counts as shown: exact under 20, to 5 under 100, to 10 under 1000,
-    then "1.2k", so a busy street doesn't redraw the screen on every poll."""
-    if n < 20:
-        return str(n)
-    if n >= 995:
-        return f"{n / 1000:.1f}k"
-    step = 5 if n < 100 else 10
-    return str(round(n / step) * step)
-
-
 def source_state(src: dict) -> str:
     """One Kismet datasource record as ok, ERR or off."""
     if src.get("kismet.datasource.error"):
@@ -169,95 +157,99 @@ def source_label(name: str) -> str:
 
 
 def gps_text(mode: int, satellites: int) -> str:
-    """gpsd's fix as shown: "gps 3d 9 sat", "gps no fix", or "gps ?"."""
+    """gpsd's fix as shown: "GPS 3D 9 SAT", "GPS NO FIX", or "GPS ?"."""
     if mode in (2, 3):
-        return f"gps {mode}d {satellites} sat"
+        return f"GPS {mode}D {satellites} SAT"
     if mode == 1:
-        return "gps no fix"
-    return "gps ?"
+        return "GPS NO FIX"
+    return "GPS ?"
 
 
-def ago(seconds: float) -> str:
-    """A coarse age that changes at most hourly: "<1h", "5h", "3d"."""
-    hours = max(0, int(seconds // 3600))
-    if hours < 1:
-        return "<1h"
-    return f"{hours}h" if hours < 48 else f"{hours // 24}d"
+def source_errors(sources: dict[str, str]) -> list[str]:
+    """Kismet's sources that aren't ok, BT first: "BT ERR", "WIFI OFF", or
+    by band with two Wi-Fi radios (WIFI_SPLIT): "2G ERR". A radio missing
+    from WIFI_BANDS shows by its name."""
+    bt, wifi = [], {}
+    for name, state in sorted(sources.items()):
+        if source_label(name) == "bt":
+            bt.append(f"BT {state.upper()}")
+        else:
+            wifi[name] = state
+    if len(wifi) == 1:
+        names = {name: "WIFI" for name in wifi}
+    else:
+        names = {name: WIFI_BANDS.get(name, name) for name in wifi}
+    return [e for e in bt if not e.endswith(" OK")] + [
+        f"{names[name]} {state.upper()}" for name, state in wifi.items() if state != "ok"
+    ]
 
 
-def sync_text(last: float | None, now: datetime, clock_synced: bool) -> str:
-    """The last sync as shown: "sync 3h ago", "sync never". Without
-    the real time "ago" can't be trusted, so it's the sync's own date and time
-    (taken at home, with the real time)."""
-    if last is None:
-        return "sync never"
-    if clock_synced:
-        return f"sync {ago(now.timestamp() - last)} ago"
-    return "sync " + datetime.fromtimestamp(last).strftime("%m-%d %H:%M")
+def errors(s: Status) -> list[str]:
+    """What's wrong with what wardriving needs, the battery first. Kismet
+    stopped at home is how it should be, so it isn't one."""
+    found = []
+    if s.battery_percent is not None and s.battery_percent <= LOW_BATTERY and not s.charging:
+        found.append(f"BATT {s.battery_percent:.0f}%")
+    if not s.kismet_up:
+        if s.home is not True:
+            found.append("KISMET DOWN")
+    elif not s.sources:
+        found.append("NO SOURCES")
+    else:
+        found += source_errors(s.sources)
+    return found
 
 
-# Emotions that take turns: five minutes each for the pairs, two for each
-# upload step, so the panel isn't redrawn every poll for them.
-LOOKING: tuple[Emotion, Emotion] = ("look_l", "look_r")
-SLEEPING: tuple[Emotion, Emotion] = ("sleep", "sleep2")
-UPLOADING: tuple[Emotion, Emotion, Emotion] = ("upload", "upload1", "upload2")
+def wrapped(words: list[str], width: int = TEXT_CHARS) -> list[str]:
+    """Each item whole, as many to a line as fit in `width` characters."""
+    lines: list[str] = []
+    for word in words:
+        if lines and len(lines[-1]) + 1 + len(word) <= width:
+            lines[-1] += " " + word
+        else:
+            lines.append(word)
+    return lines
 
 
 def emotion(s: Status) -> Emotion:
-    """The mascot's emotion, from the worst thing on the screen up: looking
-    left and right while it waits for a fix, sleep and sleep2 at home, the
-    upload arrows stepping while sessions wait to go."""
-    turn = s.now.minute // 5 % 2  # which of a pair, for five minutes
+    """The mascot's emotion, one face per meaning, from the worst thing up.
+    The wait for a fix: look_l with no satellites seen, look_r with some,
+    look_r_happy with a 2D fix, cool (or excited) with a 3D one."""
     if s.battery_percent is not None and s.battery_percent <= LOW_BATTERY and not s.charging:
         return "demotivated"
     if not s.kismet_up:
         if s.home is False:
             return "sad"
-        if s.home and s.to_send:
-            return UPLOADING[s.now.minute // 2 % len(UPLOADING)]
-        return SLEEPING[turn]
+        return "upload" if s.home and s.to_send else "sleep"
     if not s.sources or any(state != "ok" for state in s.sources.values()):
         return "broken"
-    if s.gps_mode in (2, 3):
-        heard = sum((s.recent or {}).values())
-        return "excited" if heard >= EXCITED else "cool"
-    return LOOKING[turn]
+    if s.gps_mode == 3:
+        return "excited" if sum((s.recent or {}).values()) >= EXCITED else "cool"
+    if s.gps_mode == 2:
+        return "look_r_happy"
+    if s.gps_mode == 1:
+        return "look_r" if s.seen else "look_l"
+    return "lonely"  # gpsd isn't answering
 
 
 def screen_lines(s: Status) -> list[str]:
-    """The screen's text, top to bottom: the first line is the title bar (a
-    root prompt), the rest shell lines, the last ending in a cursor. Pure, so
-    the layout is tested without a panel."""
-    where = {True: "home", False: "away", None: "?"}[s.home]
-    if not s.kismet_up:
-        sources = "$ kismet stopped"
-    elif not s.sources:
-        sources = "$ kismet: no sources"
-    else:
-        sources = "$ kismet " + " ".join(f"{source_label(n)} {state}" for n, state in sorted(s.sources.items()))
-    if s.recent is None:
-        heard = "$ heard -"
-    else:
-        heard = f"$ heard {rounded(s.recent.get('wifi', 0))}w {rounded(s.recent.get('bluetooth', 0))}bt"
-    lines = [f"root@{s.host}:~#", f"$ {where} {gps_text(s.gps_mode, s.satellites)}", sources, heard]
-    if s.battery_percent is not None:  # left out without a reading
-        lines.append(f"$ batt {s.battery_percent:.0f}%" + (" +" if s.charging else ""))
-    clock = s.now.strftime("%H:%M") + ("" if s.clock_synced else " ?")
-    if s.to_send:
-        clock += f" {s.to_send} to send"
-    return [*lines, f"$ {sync_text(s.last_sync, s.now, s.clock_synced)}", clock + "_"]
+    """The screen's text, top to bottom: the time (drawn larger), the GPS
+    fix, then the errors or NO ERRORS. Pure, so the layout is tested without
+    a panel."""
+    clock = s.now.strftime("%H:%M") + ("" if s.clock_synced else "?")
+    return [clock, gps_text(s.gps_mode, s.satellites), *(wrapped(errors(s)) or ["NO ERRORS"])]
 
 
 def off_lines(reason: str | None, shutting_down: bool, now: datetime, clock_synced: bool) -> list[str]:
     """The last screen, left on the panel while the Pi is off. `reason` is
     pisugar-watch's (a low battery); otherwise the Pi is shutting down for
     some other reason, or only the display service stopped."""
-    at = now.strftime("%Y-%m-%d %H:%M") + ("" if clock_synced else " ?")
+    at = now.strftime("%m-%d %H:%M") + ("" if clock_synced else "?")
     if reason:
-        return ["OFF", reason, at, "", "wigle-sync"]
+        return ["OFF", reason.upper()[:TEXT_CHARS], at]
     if shutting_down:
-        return ["OFF", "shut down", at, "", "wigle-sync"]
-    return ["DISPLAY STOPPED", "the Pi may still be on", at, "", "wigle-sync"]
+        return ["OFF", "SHUT DOWN", at]
+    return ["STOP", "DISPLAY STOPPED", "PI MAY BE ON", at]
 
 
 def off_mood(reason: str | None, crashed: bool) -> Emotion:
@@ -270,8 +262,8 @@ def off_mood(reason: str | None, crashed: bool) -> Emotion:
 
 def error_lines(error: Exception, now: datetime, clock_synced: bool) -> list[str]:
     """The screen while a look at Kismet, gpsd or the battery fails."""
-    at = now.strftime("%H:%M") + ("" if clock_synced else " ?")
-    return ["ERROR", type(error).__name__[:20], "see its journal", "", at]
+    at = now.strftime("%H:%M") + ("" if clock_synced else "?")
+    return ["ERROR", type(error).__name__[:TEXT_CHARS], "SEE ITS JOURNAL", at]
 
 
 def status_screen(get_status: Callable[[], Status], log) -> tuple[list[str], Emotion]:
@@ -314,9 +306,9 @@ class RefreshPolicy:
             self.partials += 1
 
 
-def gps(timeout: float = 3.0) -> tuple[int, int]:
-    """gpsd's fix mode and satellites used (as pi-metrics reads them)."""
-    mode, used = 0, 0
+def gps(timeout: float = 3.0) -> tuple[int, int, int]:
+    """gpsd's fix mode, satellites used (as pi-metrics reads them) and seen."""
+    mode, used, seen = 0, 0, 0
     try:
         with socket.create_connection(("127.0.0.1", 2947), timeout=timeout) as s:
             s.sendall(b'?WATCH={"enable":true,"json":true}\n')
@@ -333,12 +325,13 @@ def gps(timeout: float = 3.0) -> tuple[int, int]:
                 elif msg.get("class") == "SKY":
                     sats = msg.get("satellites") or []
                     used = int(msg.get("uSat", sum(1 for x in sats if x.get("used"))))
+                    seen = int(msg.get("nSat", len(sats)))
                     sky = True
                 if tpv and sky:
                     break
     except (OSError, ValueError):
         pass  # gpsd not running or garbled: shown as "GPS ?"
-    return mode, used
+    return mode, used, seen
 
 
 def credentials(path: Path) -> tuple[str, str] | None:
@@ -386,15 +379,6 @@ def battery(path: Path, now: float) -> tuple[float | None, bool | None]:
     return state.get("percent"), state.get("charging")
 
 
-def last_sync(uploaded: Path) -> float | None:
-    """When wigle-sync last moved a file into uploaded/: the newest ctime there
-    (a rename sets it; pruning old sessions doesn't touch the rest)."""
-    try:
-        return max((f.stat().st_ctime for f in uploaded.iterdir() if f.is_file()), default=None)
-    except OSError:
-        return None
-
-
 def to_send(capture: Path) -> int:
     """Sessions still waiting for wigle-sync, the one being written included."""
     try:
@@ -420,7 +404,7 @@ def shutting_down() -> bool:
 
 
 def collect(login: tuple[str, str] | None) -> Status:
-    mode, sats = gps()
+    mode, sats, seen = gps()
     sources, recent, kismet_up = {}, None, False
     if login:
         try:
@@ -440,29 +424,51 @@ def collect(login: tuple[str, str] | None) -> Status:
         home=run_ok("/usr/local/sbin/on-home-wifi"),
         gps_mode=mode,
         satellites=sats,
+        seen=seen,
         kismet_up=kismet_up,
         sources=sources,
         recent=recent,
         battery_percent=percent,
         charging=charging,
-        last_sync=last_sync(UPLOADED_DIR),
         to_send=to_send(CAPTURE_DIR),
         clock_synced=chrony_synced(),
         now=datetime.now(),
-        host=socket.gethostname(),
     )
 
 
-FACE_COLUMN = COLUMN  # px on the right for the face and its label
-TITLE_BAR = 15  # px: the inverted title bar's height
-ROW = 15  # px between shell lines, when they fit (less with a battery line)
+FACE_COLUMN = COLUMN + 8  # px on the right for the face and its label, with room either side
+GAP = 7  # px from one line's baseline to the next line's capitals
+BAR_PAD = 3  # px of black above and below the first line's capitals
+SCANLINE = 3  # px between the scanlines through the first line
+GRID = 8  # px between the grid's dots
+BRACKET = 9  # px: the face panel's bracket corners
+
+
+def bold_width(text: str, font) -> float:
+    """How wide bold_text draws `text`: each glyph widened by WEIGHT."""
+    return font.getlength(text) + WEIGHT * len(text)
+
+
+def cap_height(font) -> int:
+    return -font.getbbox("0", anchor="ls")[1]
+
+
+def bold_text(pen, x: float, baseline: int, text: str, font, fill: int = 0) -> None:
+    """VT323 is drawn in thin strokes: each glyph is drawn again
+    WEIGHT px to the right, so its uprights are thicker, and spaced that
+    much more, so the letters stay apart."""
+    for char in text:
+        for dx in range(WEIGHT + 1):
+            pen.text((x + dx, baseline), char, font=font, fill=fill, anchor="ls")
+        x += font.getlength(char) + WEIGHT
 
 
 def draw(lines: list[str], face: Emotion, rotate: int = 0):
-    """The lines as a 1-bit landscape image for the panel, inside the corner
-    chips: the first line in an inverted title bar, the rest below it, and
-    the face right of a divider with its emotion under it. Every screen has
-    the face."""
+    """The lines as a 1-bit landscape image for the panel, in brick9000's
+    board look (the user, 2026-11-20: cooler): a dot grid, the first line
+    white on a black bar with scanlines through it, the rest at TEXT under
+    it, and the face in a panel with bracket corners, its emotion in a tab.
+    Every screen has the face."""
     from PIL import Image
     from PIL import ImageDraw
     from PIL import ImageFont
@@ -470,22 +476,49 @@ def draw(lines: list[str], face: Emotion, rotate: int = 0):
     image = Image.new("1", (WIDTH, HEIGHT), 255)
     pen = ImageDraw.Draw(image)
     corner_chips(pen, WIDTH, HEIGHT)
-    title, body = ImageFont.truetype(FONT_BOLD, TITLE_SIZE), ImageFont.truetype(FONT, BODY_SIZE)
+    big, text = ImageFont.truetype(FONT, BIG), ImageFont.truetype(FONT, TEXT)
     left, right, top, bottom = BORDER + 1, WIDTH - 2 - BORDER, BORDER + 1, HEIGHT - 2 - BORDER
-    pen.rectangle((left, top, right, top + TITLE_BAR - 1), fill=0)
-    if lines:
-        pen.text((left + 3, top + 1), lines[0], font=title, fill=255)
-    rows, below = lines[1:], top + TITLE_BAR + 3  # the shell lines start under the bar
-    step = min(ROW, (bottom - below) // max(1, len(rows)))
-    for i, line in enumerate(rows):
-        pen.text((left + 5, below + i * step), line, font=body, fill=0)
     divider = right - FACE_COLUMN
-    pen.line((divider, below, divider, bottom - 1), fill=0)
+    for x in range(left + 2, divider - 2, GRID):  # the board's grid, as dots
+        for y in range(top + 2, bottom, GRID):
+            pen.point((x, y), fill=0)
+    fonts = [big] + [text] * (len(lines) - 1)
+    caps = [cap_height(font) for font in fonts]
+    height = sum(caps) + GAP * (len(lines) - 1) + 2 * BAR_PAD
+    y = top + (bottom - top - height) // 2  # the block, centred
+    x = left + 3
+    for i, (line, font, cap) in enumerate(zip(lines, fonts, caps)):
+        if i == 0:  # the bar: black, scanlines every SCANLINE rows, the text white
+            pen.rectangle((left, y, divider - 4, y + cap + 2 * BAR_PAD - 1), fill=0)
+            y += BAR_PAD + cap
+            bold_text(pen, x + 2, y, line, font, fill=255)
+            for row in range(y - cap + 1, y, SCANLINE):
+                pen.line((left, row, divider - 4, row), fill=0)
+            y += BAR_PAD + GAP
+            continue
+        y += cap
+        pen.rectangle((x - 2, y - cap - 2, x + bold_width(line, font) + 1, y + 2), fill=255)  # clear of the grid
+        bold_text(pen, x, y, line, font)
+        y += GAP
+    # The face's panel: a frame with heavy bracket corners, top left and
+    # bottom right, as the board's panels have.
+    pen.rectangle((divider, top, right, bottom - 1), outline=0)
+    for (cx, cy), (dx, dy) in (((divider, top), (1, 1)), ((right, bottom - 1), (-1, -1))):
+        pen.rectangle(sorted_box(cx, cy, cx + dx * BRACKET, cy + dy * 2), fill=0)
+        pen.rectangle(sorted_box(cx, cy, cx + dx * 2, cy + dy * BRACKET), fill=0)
     middle = (divider + right) // 2 + 1
-    label_top = bottom - BODY_SIZE - 1
-    draw_face(pen, face, middle, (below + label_top) // 2)
-    pen.text((middle, label_top), label(face), font=body, fill=0, anchor="ma")
+    label_font = ImageFont.truetype(LABEL_FONT, LABEL_SIZE)
+    name = label(face)
+    tab_top = bottom - LABEL_SIZE - 4
+    half = label_font.getlength(name) / 2 + 3
+    draw_face(pen, face, middle, (top + tab_top) // 2)
+    pen.rectangle((middle - half, tab_top, middle + half, bottom - 1), fill=0)
+    pen.text((middle, tab_top + 2), name, font=label_font, fill=255, anchor="ma")
     return image.rotate(180) if rotate == 180 else image
+
+
+def sorted_box(x0: int, y0: int, x1: int, y1: int) -> tuple[int, int, int, int]:
+    return min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)
 
 
 class Panel:

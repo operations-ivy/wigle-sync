@@ -7,7 +7,9 @@
 #   SPI/GPIO glue and the V2, V3 and V4 drivers), fetched from Waveshare's
 #   e-Paper repo at a pinned commit and checked by SHA-256. It's not packaged
 #   for Debian; pwnagotchi vendors the same files.
-# - eink-status.service, drawing with Pillow and the DejaVu fonts.
+# - eink-status.service, drawing with Pillow: VT323 for the text (the font of
+#   brick9000's board and games menu; vendored in fonts/, OFL), DejaVu for the
+#   face, Terminus for its label.
 #
 # The panel's reset pin is GPIO17, LED3's red on brick69's RGB status LEDs,
 # so the two can't share a Pi (setup-zero2w.sh skips the LEDs).
@@ -55,6 +57,8 @@ done
 : > "$LIB/waveshare_epd/__init__.py"
 
 install -m 644 "$SRC/eink-status.py" "$SRC/eink_art.py" "$SRC/../handheld_common.py" "$LIB/"
+install -d -m 755 "$LIB/fonts"
+install -m 644 "$SRC/fonts/VT323-Regular.ttf" "$SRC/fonts/LICENSE-vt323" "$LIB/fonts/"
 install -m 644 "$SRC/eink-status.service" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable eink-status.service

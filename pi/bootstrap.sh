@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds a wardriving Pi from a fresh Raspberry Pi OS (or Kali) install: Kismet
-# on wlan_mon0 and Bluetooth on hci0 (a USB dongle with the onboard Bluetooth
+# on wlan_mon0 (and a 2.4 GHz wlan_mon1 with WIFI_SPLIT=1) and Bluetooth on hci0 (a USB dongle with the onboard Bluetooth
 # turned off; on a zero2w the onboard Bluetooth itself) with gpsd, the home-wifi stop, the log size watch and the wigle-sync
 # user. Idempotent; re-run after changing pi/.
 #
@@ -68,6 +68,15 @@ while read -r rel; do
     [[ $dest == /etc/systemd/network/*.link ]] && changed_links=1
     [[ $dest == /etc/systemd/journald.conf.d/* ]] && changed_journald=1
 done < <(cd "$SRC/rootfs" && find . -type f | sort)
+# Kismet's Wi-Fi sources (kismet_site.conf includes them): wlan_mon0 alone, or
+# split by band with a 2.4 GHz dongle as wlan_mon1 (WIFI_SPLIT=1). Kismet reads
+# them when it starts.
+wifi_sources=wifi-one.conf
+[[ ${WIFI_SPLIT:-0} == 1 ]] && wifi_sources=wifi-split.conf
+if ! cmp -s "$SRC/kismet/$wifi_sources" /etc/kismet/kismet_wifi.conf; then
+    install -m 644 "$SRC/kismet/$wifi_sources" /etc/kismet/kismet_wifi.conf
+    echo "installed /etc/kismet/kismet_wifi.conf ($wifi_sources); restart Kismet or reboot to use it"
+fi
 # journald reads its drop-ins only when it starts; flush moves what's in RAM to disk.
 if (( changed_journald )); then
     systemctl restart systemd-journald.service
@@ -165,7 +174,13 @@ check "wlan_mon0 exists" ip link show wlan_mon0
 check "wlan_host exists" ip link show wlan_host
 phy_supports() { local phy; phy=$(iw dev "$1" info | awk '/wiphy/ {print "phy"$2}'); iw phy "$phy" info | sed -n '/Supported interface modes/,/^\t[^\t]/p' | grep -qx "[[:space:]]*\* $2"; }
 check "wlan_mon0 supports monitor mode" phy_supports wlan_mon0 monitor
-check "kismet_site.conf captures from wlan_mon0" grep -qx "source=wlan_mon0" /etc/kismet/kismet_site.conf
+check "kismet_site.conf includes the Wi-Fi sources" grep -qx "include=/etc/kismet/kismet_wifi.conf" /etc/kismet/kismet_site.conf
+check "Kismet captures from wlan_mon0" grep -q "^source=wlan_mon0" /etc/kismet/kismet_wifi.conf
+if [[ ${WIFI_SPLIT:-0} == 1 ]]; then
+    check "wlan_mon1 exists (the 2.4 GHz radio)" ip link show wlan_mon1
+    check "wlan_mon1 supports monitor mode" phy_supports wlan_mon1 monitor
+    check "Kismet captures from wlan_mon1" grep -q "^source=wlan_mon1" /etc/kismet/kismet_wifi.conf
+fi
 check "kismet_site.conf captures from hci0" grep -q "^source=hci0" /etc/kismet/kismet_site.conf
 check "hci0 exists" test -e /sys/class/bluetooth/hci0
 if [[ $PROFILE == zero2w ]]; then
