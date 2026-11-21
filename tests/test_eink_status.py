@@ -267,13 +267,14 @@ def test_draw_fits_the_panel(fonts):
 
 
 def assert_clear_of_the_face(lines, fonts):
-    """Every line, drawn bold, ends left of the face's divider, the first at BIG."""
+    """Every line, drawn bold, ends left of the face's panel; the first, at
+    BIG, inside its black bar."""
     big, text = fonts
     left = eink.BORDER + 1 + 3
     divider = eink.WIDTH - 2 - eink.BORDER - eink.FACE_COLUMN
-    for i, line in enumerate(lines):
-        width = eink.bold_width(line, big if i == 0 else text)
-        assert left + width < divider, line
+    assert left + 2 + eink.bold_width(lines[0], big) < divider - 4, lines[0]
+    for line in lines[1:]:
+        assert left + eink.bold_width(line, text) < divider, line
 
 
 @pytest.mark.parametrize(

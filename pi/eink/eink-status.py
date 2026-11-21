@@ -4,12 +4,12 @@ pwnagotchi): what matters on the road, readable at a glance. Three things
 (the user, 2026-11-20): the time, the GPS fix (the one thing to wait for),
 and anything wrong with what wardriving needs.
 
-    +-[a chip in each corner]-----------------------+
-    | 14:32               |                         |
-    | GPS 3D 9 SAT        |         (⌐■_■)          |
-    | NO ERRORS           |                         |
-    |                     |          cool           |
-    +-----------------------------------------------+
+    +-[a chip in each corner]---------------------------+
+    | ####[ 14:32 ]########### +--------------------+ |
+    | GPS 3D 9 SAT     .   .   |       (⌐■_■)       | |
+    | NO ERRORS    .   .   .   |       [cool]       | |
+    |  .   .   .   .   .   .   +--------------------+ |
+    +---------------------------------------------------+
 
 - The time, larger, with "?" until chrony has the real time.
 - GPS: gpsd's fix (none, 2D, 3D) and the satellites in it.
@@ -18,9 +18,11 @@ and anything wrong with what wardriving needs.
   or off (BT, WIFI; two Wi-Fi radios by band, 2G and 5G), and the PiSugar's
   battery at LOW_BATTERY or under while not charging (pisugar-watch's state
   file). On two lines when they don't fit on one.
-- The look (the user, 2026-11-20): VT323, the font of brick9000's board and
-  games menu (vendored, OFL), bold, not stick-like (bold_text); a chip in
-  each corner (eink_art.py).
+- The look (the user, 2026-11-20): brick9000's board in black and white.
+  VT323, its font and the games menu's (vendored, OFL), bold, not
+  stick-like (bold_text); the time white on a black bar with scanlines; a
+  dot grid for the board's; the face in a panel with the board's bracket
+  corners, its emotion in a tab; a chip in each corner (eink_art.py).
 - The mascot on the right, pwnagotchi's stock text faces (eink_art.py),
   each meaning one thing (the user, 2026-11-20), picked by emotion(). The
   wait for a fix reads left to right: (☉_☉ ) no satellites seen yet,
@@ -436,6 +438,10 @@ def collect(login: tuple[str, str] | None) -> Status:
 
 FACE_COLUMN = COLUMN + 8  # px on the right for the face and its label, with room either side
 GAP = 7  # px from one line's baseline to the next line's capitals
+BAR_PAD = 3  # px of black above and below the first line's capitals
+SCANLINE = 3  # px between the scanlines through the first line
+GRID = 8  # px between the grid's dots
+BRACKET = 9  # px: the face panel's bracket corners
 
 
 def bold_width(text: str, font) -> float:
@@ -447,20 +453,22 @@ def cap_height(font) -> int:
     return -font.getbbox("0", anchor="ls")[1]
 
 
-def bold_text(pen, x: float, baseline: int, text: str, font) -> None:
+def bold_text(pen, x: float, baseline: int, text: str, font, fill: int = 0) -> None:
     """VT323 is drawn in thin strokes: each glyph is drawn again
     WEIGHT px to the right, so its uprights are thicker, and spaced that
     much more, so the letters stay apart."""
     for char in text:
         for dx in range(WEIGHT + 1):
-            pen.text((x + dx, baseline), char, font=font, fill=0, anchor="ls")
+            pen.text((x + dx, baseline), char, font=font, fill=fill, anchor="ls")
         x += font.getlength(char) + WEIGHT
 
 
 def draw(lines: list[str], face: Emotion, rotate: int = 0):
-    """The lines as a 1-bit landscape image for the panel, inside the corner
-    chips: the first line at BIG, the rest at TEXT under it, and the face
-    right of a divider with its emotion under it. Every screen has the face."""
+    """The lines as a 1-bit landscape image for the panel, in brick9000's
+    board look (the user, 2026-11-20: cooler): a dot grid, the first line
+    white on a black bar with scanlines through it, the rest at TEXT under
+    it, and the face in a panel with bracket corners, its emotion in a tab.
+    Every screen has the face."""
     from PIL import Image
     from PIL import ImageDraw
     from PIL import ImageFont
@@ -470,20 +478,47 @@ def draw(lines: list[str], face: Emotion, rotate: int = 0):
     corner_chips(pen, WIDTH, HEIGHT)
     big, text = ImageFont.truetype(FONT, BIG), ImageFont.truetype(FONT, TEXT)
     left, right, top, bottom = BORDER + 1, WIDTH - 2 - BORDER, BORDER + 1, HEIGHT - 2 - BORDER
+    divider = right - FACE_COLUMN
+    for x in range(left + 2, divider - 2, GRID):  # the board's grid, as dots
+        for y in range(top + 2, bottom, GRID):
+            pen.point((x, y), fill=0)
     fonts = [big] + [text] * (len(lines) - 1)
     caps = [cap_height(font) for font in fonts]
-    y = top + (bottom - top - sum(caps) - GAP * (len(lines) - 1)) // 2  # the block, centred
-    for line, font, cap in zip(lines, fonts, caps):
+    height = sum(caps) + GAP * (len(lines) - 1) + 2 * BAR_PAD
+    y = top + (bottom - top - height) // 2  # the block, centred
+    x = left + 3
+    for i, (line, font, cap) in enumerate(zip(lines, fonts, caps)):
+        if i == 0:  # the bar: black, scanlines every SCANLINE rows, the text white
+            pen.rectangle((left, y, divider - 4, y + cap + 2 * BAR_PAD - 1), fill=0)
+            y += BAR_PAD + cap
+            bold_text(pen, x + 2, y, line, font, fill=255)
+            for row in range(y - cap + 1, y, SCANLINE):
+                pen.line((left, row, divider - 4, row), fill=0)
+            y += BAR_PAD + GAP
+            continue
         y += cap
-        bold_text(pen, left + 3, y, line, font)
+        pen.rectangle((x - 2, y - cap - 2, x + bold_width(line, font) + 1, y + 2), fill=255)  # clear of the grid
+        bold_text(pen, x, y, line, font)
         y += GAP
-    divider = right - FACE_COLUMN
-    pen.line((divider, top, divider, bottom - 1), fill=0)
+    # The face's panel: a frame with heavy bracket corners, top left and
+    # bottom right, as the board's panels have.
+    pen.rectangle((divider, top, right, bottom - 1), outline=0)
+    for (cx, cy), (dx, dy) in (((divider, top), (1, 1)), ((right, bottom - 1), (-1, -1))):
+        pen.rectangle(sorted_box(cx, cy, cx + dx * BRACKET, cy + dy * 2), fill=0)
+        pen.rectangle(sorted_box(cx, cy, cx + dx * 2, cy + dy * BRACKET), fill=0)
     middle = (divider + right) // 2 + 1
-    label_top = bottom - LABEL_SIZE - 1
-    draw_face(pen, face, middle, (top + label_top) // 2)
-    pen.text((middle, label_top), label(face), font=ImageFont.truetype(LABEL_FONT, LABEL_SIZE), fill=0, anchor="ma")
+    label_font = ImageFont.truetype(LABEL_FONT, LABEL_SIZE)
+    name = label(face)
+    tab_top = bottom - LABEL_SIZE - 4
+    half = label_font.getlength(name) / 2 + 3
+    draw_face(pen, face, middle, (top + tab_top) // 2)
+    pen.rectangle((middle - half, tab_top, middle + half, bottom - 1), fill=0)
+    pen.text((middle, tab_top + 2), name, font=label_font, fill=255, anchor="ma")
     return image.rotate(180) if rotate == 180 else image
+
+
+def sorted_box(x0: int, y0: int, x1: int, y1: int) -> tuple[int, int, int, int]:
+    return min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)
 
 
 class Panel:
