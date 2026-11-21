@@ -18,16 +18,18 @@ and anything wrong with what wardriving needs.
   or off (BT, WIFI; two Wi-Fi radios by band, 2G and 5G), and the PiSugar's
   battery at LOW_BATTERY or under while not charging (pisugar-watch's state
   file). On two lines when they don't fit on one.
-- The look: DotGothic16, a pixel font drawn on a 16 px grid (the time at
-  twice that), so every glyph lands on whole pixels; a chip in each corner
-  (eink_art.py).
-- The mascot on the right, pwnagotchi's stock text face for each of its 25
-  emotions (eink_art.py; the user, 2026-11-20), picked by emotion():
-  cool capturing with a fix (excited when it hears a lot), looking left and
-  right while it waits for one, sleep at home with Kismet stopped (upload
-  while sessions wait to go), broken with a source down, sad with Kismet
-  stopped away from home, demotivated on a low battery, awake on the first
-  screen. Every screen has one: an error reading Kismet, gpsd or the battery
+- The look (the user, 2026-11-20): DotGothic16, a pixel font, on its 16 px
+  grid so every glyph lands on whole pixels; bold, not stick-like
+  (bold_text); the time squat, its glyphs scaled 3 wide and 2 tall
+  (squat_text); a chip in each corner (eink_art.py).
+- The mascot on the right, pwnagotchi's stock text faces (eink_art.py),
+  each meaning one thing (the user, 2026-11-20), picked by emotion(). The
+  wait for a fix reads left to right: (☉_☉ ) no satellites seen yet,
+  ( ⚆_⚆) some seen, ( ◕‿◕) a 2D fix, then cool with a 3D fix (excited
+  when it hears a lot). lonely: gpsd not answering. broken: a source down.
+  sad: Kismet down away from home. demotivated: a low battery. At home with
+  Kismet stopped: sleep, or upload while sessions wait to go. awake: the
+  first screen. Every screen has one: an error reading Kismet, gpsd or the battery
   shows an ERROR screen with debug, and the last screen, left while the Pi
   is off, sleeps, is demotivated after a low-battery shutdown, or broken if
   the display crashed.
@@ -99,8 +101,11 @@ WIDTH, HEIGHT = 250, 122  # the 2.13" panels, landscape
 # 2026-11-17: retro): crisp on a 1-bit panel. Sizes are its bitmap strikes, in
 # pixels; at 12 a character is 6 px wide.
 FONT = "/usr/share/fonts/truetype/dotgothic16/DotGothic16-Regular.ttf"
-BIG, TEXT = 32, 16  # pixels: the time, the other lines (DotGothic16's grid and twice it)
-TEXT_CHARS = 18  # characters on a TEXT line left of the face (8 px each)
+TEXT = 16  # pixels: DotGothic16's grid
+WEIGHT = 1  # px each glyph is thickened by, and the space added after it
+SQUAT = (3, 2)  # the first line: TEXT's glyphs scaled 3 wide and 2 tall (the user: squat)
+SQUAT_ADVANCE = 22  # px per character of the first line: 3 x 8, less its blank side
+TEXT_CHARS = 15  # characters on a TEXT line left of the face (8 px each, 9 in bold)
 LABEL_FONT = "/usr/share/fonts/opentype/terminus/terminus-normal.otb"
 LABEL_SIZE = 12  # pixels: the face's label, in Terminus to fit its column
 
@@ -111,7 +116,8 @@ class Status:
 
     home: bool | None = None
     gps_mode: int = 0  # gpsd: 0 unknown, 1 no fix, 2 2D, 3 3D
-    satellites: int = 0
+    satellites: int = 0  # used in the fix
+    seen: int = 0  # in view, used or not
     kismet_up: bool = False
     sources: dict[str, str] = field(default_factory=dict)  # name: ok, ERR, off
     recent: dict[str, int] | None = None  # wifi, bluetooth
@@ -206,32 +212,25 @@ def wrapped(words: list[str], width: int = TEXT_CHARS) -> list[str]:
     return lines
 
 
-# Emotions that take turns: five minutes each for the pairs, two for each
-# upload step, so the panel isn't redrawn every poll for them.
-LOOKING: tuple[Emotion, Emotion] = ("look_l", "look_r")
-SLEEPING: tuple[Emotion, Emotion] = ("sleep", "sleep2")
-UPLOADING: tuple[Emotion, Emotion, Emotion] = ("upload", "upload1", "upload2")
-
-
 def emotion(s: Status) -> Emotion:
-    """The mascot's emotion, from the worst thing on the screen up: looking
-    left and right while it waits for a fix, sleep and sleep2 at home, the
-    upload arrows stepping while sessions wait to go."""
-    turn = s.now.minute // 5 % 2  # which of a pair, for five minutes
+    """The mascot's emotion, one face per meaning, from the worst thing up.
+    The wait for a fix: look_l with no satellites seen, look_r with some,
+    look_r_happy with a 2D fix, cool (or excited) with a 3D one."""
     if s.battery_percent is not None and s.battery_percent <= LOW_BATTERY and not s.charging:
         return "demotivated"
     if not s.kismet_up:
         if s.home is False:
             return "sad"
-        if s.home and s.to_send:
-            return UPLOADING[s.now.minute // 2 % len(UPLOADING)]
-        return SLEEPING[turn]
+        return "upload" if s.home and s.to_send else "sleep"
     if not s.sources or any(state != "ok" for state in s.sources.values()):
         return "broken"
-    if s.gps_mode in (2, 3):
-        heard = sum((s.recent or {}).values())
-        return "excited" if heard >= EXCITED else "cool"
-    return LOOKING[turn]
+    if s.gps_mode == 3:
+        return "excited" if sum((s.recent or {}).values()) >= EXCITED else "cool"
+    if s.gps_mode == 2:
+        return "look_r_happy"
+    if s.gps_mode == 1:
+        return "look_r" if s.seen else "look_l"
+    return "lonely"  # gpsd isn't answering
 
 
 def screen_lines(s: Status) -> list[str]:
@@ -246,12 +245,12 @@ def off_lines(reason: str | None, shutting_down: bool, now: datetime, clock_sync
     """The last screen, left on the panel while the Pi is off. `reason` is
     pisugar-watch's (a low battery); otherwise the Pi is shutting down for
     some other reason, or only the display service stopped."""
-    at = now.strftime("%Y-%m-%d %H:%M") + ("" if clock_synced else "?")
+    at = now.strftime("%m-%d %H:%M") + ("" if clock_synced else "?")
     if reason:
-        return ["OFF", reason.upper(), at]
+        return ["OFF", reason.upper()[:TEXT_CHARS], at]
     if shutting_down:
         return ["OFF", "SHUT DOWN", at]
-    return ["STOPPED", "DISPLAY STOPPED", "PI MAY BE ON", at]
+    return ["STOP", "DISPLAY STOPPED", "PI MAY BE ON", at]
 
 
 def off_mood(reason: str | None, crashed: bool) -> Emotion:
@@ -308,9 +307,9 @@ class RefreshPolicy:
             self.partials += 1
 
 
-def gps(timeout: float = 3.0) -> tuple[int, int]:
-    """gpsd's fix mode and satellites used (as pi-metrics reads them)."""
-    mode, used = 0, 0
+def gps(timeout: float = 3.0) -> tuple[int, int, int]:
+    """gpsd's fix mode, satellites used (as pi-metrics reads them) and seen."""
+    mode, used, seen = 0, 0, 0
     try:
         with socket.create_connection(("127.0.0.1", 2947), timeout=timeout) as s:
             s.sendall(b'?WATCH={"enable":true,"json":true}\n')
@@ -327,12 +326,13 @@ def gps(timeout: float = 3.0) -> tuple[int, int]:
                 elif msg.get("class") == "SKY":
                     sats = msg.get("satellites") or []
                     used = int(msg.get("uSat", sum(1 for x in sats if x.get("used"))))
+                    seen = int(msg.get("nSat", len(sats)))
                     sky = True
                 if tpv and sky:
                     break
     except (OSError, ValueError):
         pass  # gpsd not running or garbled: shown as "GPS ?"
-    return mode, used
+    return mode, used, seen
 
 
 def credentials(path: Path) -> tuple[str, str] | None:
@@ -405,7 +405,7 @@ def shutting_down() -> bool:
 
 
 def collect(login: tuple[str, str] | None) -> Status:
-    mode, sats = gps()
+    mode, sats, seen = gps()
     sources, recent, kismet_up = {}, None, False
     if login:
         try:
@@ -425,6 +425,7 @@ def collect(login: tuple[str, str] | None) -> Status:
         home=run_ok("/usr/local/sbin/on-home-wifi"),
         gps_mode=mode,
         satellites=sats,
+        seen=seen,
         kismet_up=kismet_up,
         sources=sources,
         recent=recent,
@@ -436,13 +437,54 @@ def collect(login: tuple[str, str] | None) -> Status:
     )
 
 
-FACE_COLUMN = COLUMN  # px on the right for the face and its label
+FACE_COLUMN = COLUMN + 8  # px on the right for the face and its label, with room either side
 GAP = 7  # px from one line's baseline to the next line's capitals
+
+
+def bold_width(text: str, font) -> float:
+    """How wide bold_text draws `text`: each glyph widened by WEIGHT."""
+    return font.getlength(text) + WEIGHT * len(text)
+
+
+def squat_width(text: str) -> int:
+    """How wide squat_text draws `text`."""
+    return SQUAT_ADVANCE * len(text)
+
+
+def cap_height(font) -> int:
+    return -font.getbbox("0", anchor="ls")[1]
+
+
+def bold_text(pen, x: float, baseline: int, text: str, font) -> None:
+    """DotGothic16 is drawn in 1 px strokes: each glyph is drawn again
+    WEIGHT px to the right, so its uprights are thicker, and spaced that
+    much more, so the letters stay apart."""
+    for char in text:
+        for dx in range(WEIGHT + 1):
+            pen.text((x + dx, baseline), char, font=font, fill=0, anchor="ls")
+        x += font.getlength(char) + WEIGHT
+
+
+def squat_text(image, x: int, baseline: int, text: str, font) -> None:
+    """`text` bold at TEXT, each glyph scaled by SQUAT (whole pixels, so it
+    stays crisp) and stamped SQUAT_ADVANCE apart: only its ink is pasted,
+    so a glyph's blank side doesn't wipe the one before."""
+    from PIL import Image
+    from PIL import ImageDraw
+    from PIL import ImageOps
+
+    cap, (wide, tall) = cap_height(font), SQUAT
+    for char in text:
+        glyph = Image.new("1", (TEXT, TEXT), 255)  # 1-bit, as the panel: no grey edges
+        bold_text(ImageDraw.Draw(glyph), 0, cap, char, font)
+        glyph = glyph.resize((TEXT * wide, TEXT * tall), Image.NEAREST)
+        image.paste(0, (x, baseline - cap * tall), mask=ImageOps.invert(glyph.convert("L")))
+        x += SQUAT_ADVANCE
 
 
 def draw(lines: list[str], face: Emotion, rotate: int = 0):
     """The lines as a 1-bit landscape image for the panel, inside the corner
-    chips: the first line at BIG, the rest at TEXT under it, and the face
+    chips: the first line squat, the rest at TEXT under it, and the face
     right of a divider with its emotion under it. Every screen has the face."""
     from PIL import Image
     from PIL import ImageDraw
@@ -451,14 +493,17 @@ def draw(lines: list[str], face: Emotion, rotate: int = 0):
     image = Image.new("1", (WIDTH, HEIGHT), 255)
     pen = ImageDraw.Draw(image)
     corner_chips(pen, WIDTH, HEIGHT)
-    big, text = ImageFont.truetype(FONT, BIG), ImageFont.truetype(FONT, TEXT)
+    text = ImageFont.truetype(FONT, TEXT)
     left, right, top, bottom = BORDER + 1, WIDTH - 2 - BORDER, BORDER + 1, HEIGHT - 2 - BORDER
-    fonts = [big] + [text] * (len(lines) - 1)
-    caps = [-font.getbbox("0", anchor="ls")[1] for font in fonts]  # each line's cap height
+    cap = cap_height(text)
+    caps = [cap * SQUAT[1]] + [cap] * (len(lines) - 1)  # each line's cap height
     y = top + (bottom - top - sum(caps) - GAP * (len(lines) - 1)) // 2  # the block, centred
-    for line, font, cap in zip(lines, fonts, caps):
-        y += cap
-        pen.text((left + 3, y), line, font=font, fill=0, anchor="ls")  # on its baseline
+    for i, (line, line_cap) in enumerate(zip(lines, caps)):
+        y += line_cap
+        if i == 0:
+            squat_text(image, left + 3, y, line, text)
+        else:
+            bold_text(pen, left + 3, y, line, text)
         y += GAP
     divider = right - FACE_COLUMN
     pen.line((divider, top, divider, bottom - 1), fill=0)

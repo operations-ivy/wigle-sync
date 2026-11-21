@@ -126,16 +126,14 @@ def test_source_state_and_label():
     [
         ({}, "cool"),
         ({"recent": {"wifi": 350, "bluetooth": 60}}, "excited"),
-        ({"gps_mode": 1}, "look_l"),  # 12:34: the first five minutes of the turn
-        ({"gps_mode": 1, "now": NOON + timedelta(minutes=5)}, "look_r"),
+        ({"gps_mode": 1, "satellites": 0, "seen": 0}, "look_l"),
+        ({"gps_mode": 1, "satellites": 0, "seen": 4}, "look_r"),
+        ({"gps_mode": 2}, "look_r_happy"),
+        ({"gps_mode": 0}, "lonely"),
         ({"home": True, "kismet_up": False, "sources": {}, "to_send": 0}, "sleep"),
-        (
-            {"home": True, "kismet_up": False, "sources": {}, "to_send": 0, "now": NOON + timedelta(minutes=11)},
-            "sleep2",
-        ),
         ({"home": None, "kismet_up": False, "sources": {}}, "sleep"),
-        ({"home": True, "kismet_up": False, "sources": {}}, "upload2"),  # 12:34: the third step
-        ({"home": True, "kismet_up": False, "sources": {}, "now": NOON + timedelta(minutes=2)}, "upload"),
+        ({"home": True, "kismet_up": False, "sources": {}}, "upload"),
+        ({"home": True, "kismet_up": False, "sources": {}, "now": NOON + timedelta(minutes=11)}, "upload"),
         ({"home": False, "kismet_up": False, "sources": {}}, "sad"),
         ({"sources": {"usb_bt": "ok", "wlan_mon0": "ERR"}}, "broken"),
         ({"sources": {}}, "broken"),
@@ -168,9 +166,9 @@ def test_count_recent():
 
 
 def test_off_screens():
-    assert eink.off_lines("battery 9%", True, NOON, True) == ["OFF", "BATTERY 9%", "2026-11-16 12:34"]
-    assert eink.off_lines(None, True, NOON, False) == ["OFF", "SHUT DOWN", "2026-11-16 12:34?"]
-    assert eink.off_lines(None, False, NOON, True)[:2] == ["STOPPED", "DISPLAY STOPPED"]
+    assert eink.off_lines("battery 9%", True, NOON, True) == ["OFF", "BATTERY 9%", "11-16 12:34"]
+    assert eink.off_lines(None, True, NOON, False) == ["OFF", "SHUT DOWN", "11-16 12:34?"]
+    assert eink.off_lines(None, False, NOON, True)[:2] == ["STOP", "DISPLAY STOPPED"]
 
 
 def test_battery_state_file(tmp_path):
@@ -254,13 +252,13 @@ def test_credentials(tmp_path):
 
 @pytest.fixture
 def fonts():
-    """DotGothic16 at the time's size and the other lines', or a skip where
-    it or Terminus (the face's label) isn't installed."""
+    """DotGothic16 at TEXT, or a skip where it or Terminus (the face's
+    label) isn't installed."""
     image_font = pytest.importorskip("PIL.ImageFont")
     for path, package in ((eink.FONT, "fonts-dotgothic16"), (eink.LABEL_FONT, "fonts-terminus-otb")):
         if not Path(path).exists():
             pytest.skip(f"no {path} ({package})")
-    return image_font.truetype(eink.FONT, eink.BIG), image_font.truetype(eink.FONT, eink.TEXT)
+    return image_font.truetype(eink.FONT, eink.TEXT)
 
 
 def test_draw_fits_the_panel(fonts):
@@ -270,12 +268,12 @@ def test_draw_fits_the_panel(fonts):
 
 
 def assert_clear_of_the_face(lines, fonts):
-    """Every line ends left of the face's divider, the first at the larger size."""
-    big, text = fonts
+    """Every line ends left of the face's divider: the first squat, the rest bold."""
     left = eink.BORDER + 1 + 3
     divider = eink.WIDTH - 2 - eink.BORDER - eink.FACE_COLUMN
     for i, line in enumerate(lines):
-        assert left + (big if i == 0 else text).getlength(line) < divider, line
+        width = eink.squat_width(line) if i == 0 else eink.bold_width(line, fonts)
+        assert left + width < divider, line
 
 
 @pytest.mark.parametrize(
