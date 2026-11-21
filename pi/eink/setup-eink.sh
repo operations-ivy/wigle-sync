@@ -7,7 +7,8 @@
 #   SPI/GPIO glue and the V2, V3 and V4 drivers), fetched from Waveshare's
 #   e-Paper repo at a pinned commit and checked by SHA-256. It's not packaged
 #   for Debian; pwnagotchi vendors the same files.
-# - eink-status.service, drawing with Pillow and the DejaVu fonts.
+# - eink-status.service, drawing with Pillow: DotGothic16 (a pixel font) for
+#   the text, DejaVu for the face, Terminus for its label.
 #
 # The panel's reset pin is GPIO17, LED3's red on brick69's RGB status LEDs,
 # so the two can't share a Pi (setup-zero2w.sh skips the LEDs).
@@ -28,7 +29,7 @@ declare -A SHA256=(
 LIB=/usr/local/lib/wigle-eink
 
 apt-get install -y -q --no-install-recommends python3 python3-pil python3-spidev python3-gpiozero python3-lgpio \
-    python3-structlog python3-yaml fonts-dejavu-core fonts-terminus-otb curl
+    python3-structlog python3-yaml fonts-dejavu-core fonts-terminus-otb fonts-dotgothic16 curl
 
 config=/boot/firmware/config.txt
 if [[ -f $config ]] && ! grep -qx 'dtparam=spi=on' "$config"; then

@@ -109,8 +109,7 @@ Wi-Fi sources as `/etc/kismet/kismet_wifi.conf` (`pi/kismet/wifi-split.conf`;
 `wifi-one.conf` without the setting) and checks `wlan_mon1`. A new `.link`
 only renames a radio once it's re-plugged or the Pi reboots. Another 2.4 GHz
 model needs its own `.link` beside `10-wlan_mon1.link`. On the e-ink screen
-the two show as one `wifi ok` while both are, else each one that isn't, by
-band (`2g ERR`, `5g off`).
+a radio that isn't ok shows by band (`2G ERR`, `5G OFF`).
 
 The Pi Zero 2 W handheld (the `zero2w` profile) uses its **onboard** Bluetooth
 as `hci0` instead, with no dongle: `bootstrap.sh` leaves `disable-bt` out (and
@@ -224,13 +223,14 @@ it). On brick69's Pi 3B+ the profile is `default` and nothing below runs.
   be a USB host (a pwnagotchi image sets it up as a USB gadget for its
   tether; a fresh Raspberry Pi OS doesn't). With the hub there, there's no
   USB tether: reach the Pi over the home Wi-Fi as usual.
-- **`EINK=1`**: `eink-status.service` (`pi/eink/`) shows home or away, the
-  GPS fix, Kismet's sources, devices heard in the last minute, the battery,
-  the last sync (when wigle-sync last moved a session into `uploaded/`), the
-  time and how many sessions wait to be sent, as a root shell in Terminus
-  with a chip in each corner and pwnagotchi's stock text face summing
-  it up in one of its 25 emotions (cool, looking left and right,
-  sleep, upload, broken, sad, demotivated, debug...; `pi/eink/eink_art.py`).
+- **`EINK=1`**: `eink-status.service` (`pi/eink/`) shows three things (the
+  user, 2026-11-20): the time, larger; the GPS fix, the one thing to wait
+  for; and anything wrong with what wardriving needs (Kismet down away from
+  home, a capture source in error or off, a low battery), else `NO ERRORS`.
+  In DotGothic16, a pixel font, with a chip in each corner and pwnagotchi's
+  stock text face summing it up in one of its 25 emotions (cool, looking
+  left and right, sleep, upload, broken, sad, demotivated, debug...;
+  `pi/eink/eink_art.py`).
   It asks the
   same places pi-metrics does (Kismet's REST API, gpsd, `on-home-wifi`) and redraws only when the text changes: a partial
   refresh at most every 30 s, a full one after 30 partial ones or 30
