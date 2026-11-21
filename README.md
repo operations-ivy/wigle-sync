@@ -227,9 +227,9 @@ it). On brick69's Pi 3B+ the profile is `default` and nothing below runs.
   user, 2026-11-20): the time, larger; the GPS fix, the one thing to wait
   for; and anything wrong with what wardriving needs (Kismet down away from
   home, a capture source in error or off, a low battery), else `NO ERRORS`.
-  In DotGothic16, a pixel font, with a chip in each corner and pwnagotchi's
-  stock text face summing it up in one of its 25 emotions (cool, looking
-  left and right, sleep, upload, broken, sad, demotivated, debug...;
+  In VT323, brick9000's board and games-menu font, with a chip in each
+  corner and pwnagotchi's stock text face summing it up, one face per
+  meaning (the wait for a fix, broken, sad, demotivated, sleep, upload...;
   `pi/eink/eink_art.py`).
   It asks the
   same places pi-metrics does (Kismet's REST API, gpsd, `on-home-wifi`) and redraws only when the text changes: a partial

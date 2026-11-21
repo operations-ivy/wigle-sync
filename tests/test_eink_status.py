@@ -252,13 +252,12 @@ def test_credentials(tmp_path):
 
 @pytest.fixture
 def fonts():
-    """DotGothic16 at TEXT, or a skip where it or Terminus (the face's
-    label) isn't installed."""
+    """VT323 at BIG and TEXT, or a skip where Pillow or Terminus (the
+    face's label) isn't installed."""
     image_font = pytest.importorskip("PIL.ImageFont")
-    for path, package in ((eink.FONT, "fonts-dotgothic16"), (eink.LABEL_FONT, "fonts-terminus-otb")):
-        if not Path(path).exists():
-            pytest.skip(f"no {path} ({package})")
-    return image_font.truetype(eink.FONT, eink.TEXT)
+    if not Path(eink.LABEL_FONT).exists():
+        pytest.skip("no Terminus font (fonts-terminus-otb)")
+    return image_font.truetype(eink.FONT, eink.BIG), image_font.truetype(eink.FONT, eink.TEXT)
 
 
 def test_draw_fits_the_panel(fonts):
@@ -268,11 +267,12 @@ def test_draw_fits_the_panel(fonts):
 
 
 def assert_clear_of_the_face(lines, fonts):
-    """Every line ends left of the face's divider: the first squat, the rest bold."""
+    """Every line, drawn bold, ends left of the face's divider, the first at BIG."""
+    big, text = fonts
     left = eink.BORDER + 1 + 3
     divider = eink.WIDTH - 2 - eink.BORDER - eink.FACE_COLUMN
     for i, line in enumerate(lines):
-        width = eink.squat_width(line) if i == 0 else eink.bold_width(line, fonts)
+        width = eink.bold_width(line, big if i == 0 else text)
         assert left + width < divider, line
 
 

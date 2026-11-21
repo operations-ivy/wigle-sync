@@ -18,10 +18,9 @@ and anything wrong with what wardriving needs.
   or off (BT, WIFI; two Wi-Fi radios by band, 2G and 5G), and the PiSugar's
   battery at LOW_BATTERY or under while not charging (pisugar-watch's state
   file). On two lines when they don't fit on one.
-- The look (the user, 2026-11-20): DotGothic16, a pixel font, on its 16 px
-  grid so every glyph lands on whole pixels; bold, not stick-like
-  (bold_text); the time squat, its glyphs scaled 3 wide and 2 tall
-  (squat_text); a chip in each corner (eink_art.py).
+- The look (the user, 2026-11-20): VT323, the font of brick9000's board and
+  games menu (vendored, OFL), bold, not stick-like (bold_text); a chip in
+  each corner (eink_art.py).
 - The mascot on the right, pwnagotchi's stock text faces (eink_art.py),
   each meaning one thing (the user, 2026-11-20), picked by emotion(). The
   wait for a fix reads left to right: (☉_☉ ) no satellites seen yet,
@@ -97,14 +96,12 @@ DEFAULTS = {
     "full_interval": 1800,
 }
 WIDTH, HEIGHT = 250, 122  # the 2.13" panels, landscape
-# Terminus, the Linux console's bitmap font (fonts-terminus-otb; the user,
-# 2026-11-17: retro): crisp on a 1-bit panel. Sizes are its bitmap strikes, in
-# pixels; at 12 a character is 6 px wide.
-FONT = "/usr/share/fonts/truetype/dotgothic16/DotGothic16-Regular.ttf"
-TEXT = 16  # pixels: DotGothic16's grid
+# VT323 for the text (the user, 2026-11-20: brick9000's board and games-menu
+# font), drawn bold; Terminus, a bitmap font, for the face's label, which
+# fits its column at 12 (6 px a character).
+FONT = str(Path(__file__).parent / "fonts" / "VT323-Regular.ttf")  # here and as setup-eink.sh installs it
+BIG, TEXT = 44, 20  # pixels: the time, the other lines
 WEIGHT = 1  # px each glyph is thickened by, and the space added after it
-SQUAT = (3, 2)  # the first line: TEXT's glyphs scaled 3 wide and 2 tall (the user: squat)
-SQUAT_ADVANCE = 22  # px per character of the first line: 3 x 8, less its blank side
 TEXT_CHARS = 15  # characters on a TEXT line left of the face (8 px each, 9 in bold)
 LABEL_FONT = "/usr/share/fonts/opentype/terminus/terminus-normal.otb"
 LABEL_SIZE = 12  # pixels: the face's label, in Terminus to fit its column
@@ -446,17 +443,12 @@ def bold_width(text: str, font) -> float:
     return font.getlength(text) + WEIGHT * len(text)
 
 
-def squat_width(text: str) -> int:
-    """How wide squat_text draws `text`."""
-    return SQUAT_ADVANCE * len(text)
-
-
 def cap_height(font) -> int:
     return -font.getbbox("0", anchor="ls")[1]
 
 
 def bold_text(pen, x: float, baseline: int, text: str, font) -> None:
-    """DotGothic16 is drawn in 1 px strokes: each glyph is drawn again
+    """VT323 is drawn in thin strokes: each glyph is drawn again
     WEIGHT px to the right, so its uprights are thicker, and spaced that
     much more, so the letters stay apart."""
     for char in text:
@@ -465,26 +457,9 @@ def bold_text(pen, x: float, baseline: int, text: str, font) -> None:
         x += font.getlength(char) + WEIGHT
 
 
-def squat_text(image, x: int, baseline: int, text: str, font) -> None:
-    """`text` bold at TEXT, each glyph scaled by SQUAT (whole pixels, so it
-    stays crisp) and stamped SQUAT_ADVANCE apart: only its ink is pasted,
-    so a glyph's blank side doesn't wipe the one before."""
-    from PIL import Image
-    from PIL import ImageDraw
-    from PIL import ImageOps
-
-    cap, (wide, tall) = cap_height(font), SQUAT
-    for char in text:
-        glyph = Image.new("1", (TEXT, TEXT), 255)  # 1-bit, as the panel: no grey edges
-        bold_text(ImageDraw.Draw(glyph), 0, cap, char, font)
-        glyph = glyph.resize((TEXT * wide, TEXT * tall), Image.NEAREST)
-        image.paste(0, (x, baseline - cap * tall), mask=ImageOps.invert(glyph.convert("L")))
-        x += SQUAT_ADVANCE
-
-
 def draw(lines: list[str], face: Emotion, rotate: int = 0):
     """The lines as a 1-bit landscape image for the panel, inside the corner
-    chips: the first line squat, the rest at TEXT under it, and the face
+    chips: the first line at BIG, the rest at TEXT under it, and the face
     right of a divider with its emotion under it. Every screen has the face."""
     from PIL import Image
     from PIL import ImageDraw
@@ -493,17 +468,14 @@ def draw(lines: list[str], face: Emotion, rotate: int = 0):
     image = Image.new("1", (WIDTH, HEIGHT), 255)
     pen = ImageDraw.Draw(image)
     corner_chips(pen, WIDTH, HEIGHT)
-    text = ImageFont.truetype(FONT, TEXT)
+    big, text = ImageFont.truetype(FONT, BIG), ImageFont.truetype(FONT, TEXT)
     left, right, top, bottom = BORDER + 1, WIDTH - 2 - BORDER, BORDER + 1, HEIGHT - 2 - BORDER
-    cap = cap_height(text)
-    caps = [cap * SQUAT[1]] + [cap] * (len(lines) - 1)  # each line's cap height
+    fonts = [big] + [text] * (len(lines) - 1)
+    caps = [cap_height(font) for font in fonts]
     y = top + (bottom - top - sum(caps) - GAP * (len(lines) - 1)) // 2  # the block, centred
-    for i, (line, line_cap) in enumerate(zip(lines, caps)):
-        y += line_cap
-        if i == 0:
-            squat_text(image, left + 3, y, line, text)
-        else:
-            bold_text(pen, left + 3, y, line, text)
+    for line, font, cap in zip(lines, fonts, caps):
+        y += cap
+        bold_text(pen, left + 3, y, line, font)
         y += GAP
     divider = right - FACE_COLUMN
     pen.line((divider, top, divider, bottom - 1), fill=0)
