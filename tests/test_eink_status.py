@@ -87,7 +87,7 @@ def test_a_source_in_error():
         ({"usb_bt": "ok"}, "bt ok"),
     ],
 )
-def test_two_wifi_radios_show_as_one_while_both_are_ok(sources, text):
+def test_sources_text_merges_ok_wifi_radios(sources, text):
     assert eink.sources_text(sources) == text
 
 

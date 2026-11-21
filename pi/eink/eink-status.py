@@ -5,7 +5,7 @@ pwnagotchi): what matters on the road, readable at a glance.
     +-[a chip in each corner]-----------------------+
     | root@scootypuffsr:~#        (inverted bar)     |
     | $ away gps 3d 9 sat          |                 |
-    | $ kismet BT ok wifi ok       |     (⌐■_■)      |
+    | $ kismet bt ok wifi ok       |     (⌐■_■)      |
     | $ heard 245w 30bt            |                 |
     | $ sync 3h ago                |      cool       |
     | 14:32 2 to send_             |                 |
@@ -13,8 +13,9 @@ pwnagotchi): what matters on the road, readable at a glance.
 
 - Home or away: on the home Wi-Fi or not (on-home-wifi, as pi-metrics uses).
 - GPS: gpsd's fix (none, 2D, 3D) and the satellites in it.
-- Kismet's capture sources: ok, ERR (in error), off; or "Kismet stopped"
-  (at home it stops 15 minutes after joining the Wi-Fi).
+- Kismet's capture sources: ok, ERR (in error), off; two Wi-Fi radios
+  show as one "wifi ok" while both are, else by band ("2g ERR");
+  or "Kismet stopped" (at home it stops 15 minutes after joining the Wi-Fi).
 - Devices Kismet heard in the last minute, by Wi-Fi and Bluetooth, rounded
   so the screen doesn't change on every count.
 - The PiSugar's battery from pisugar-watch's state file ("+" while charging),
@@ -84,6 +85,7 @@ Refresh = Literal["full", "partial"]
 CONFIG = Path(os.environ.get("HANDHELD_CONFIG", "/etc/wigle-pi/handheld.yaml"))
 STATE_DIR = Path(os.environ.get("WIGLE_PI_STATE", "/run/wigle-pi"))
 KISMET = "http://127.0.0.1:2501"
+WIFI_BANDS = {"wlan_mon0": "5g", "wlan_mon1": "2g"}  # WIFI_SPLIT's radios, by band
 # Where Kismet logs and wigle-sync collects (its PI_REMOTE_DIR, PI_ARCHIVE_DIR).
 CAPTURE_DIR = Path(os.environ.get("KISMET_LOG_DIR", "/var/log/kismet"))
 UPLOADED_DIR = CAPTURE_DIR / "uploaded"
@@ -170,18 +172,21 @@ def source_label(name: str) -> str:
 
 def sources_text(sources: dict[str, str]) -> str:
     """Kismet's sources and their states, bt first. Two Wi-Fi radios
-    (WIFI_SPLIT: wlan_mon1 on 2.4 GHz, wlan_mon0 on 5 GHz) show as one
-    "wifi ok" while both are, else each one that isn't, by band ("2g ERR"),
-    so the line stays clear of the face."""
-    bt = [f"bt {state}" for name, state in sorted(sources.items()) if source_label(name) == "bt"]
-    wifi = {name: state for name, state in sorted(sources.items()) if source_label(name) == "wifi"}
+    (WIFI_SPLIT) show as one "wifi ok" while both are, else each one that
+    isn't, by band ("2g ERR"), so the line stays clear of the face."""
+    bt, wifi = [], {}
+    for name, state in sorted(sources.items()):
+        if source_label(name) == "bt":
+            bt.append(f"bt {state}")
+        else:
+            wifi[name] = state
     if len(wifi) == 1:
-        shown = [f"wifi {state}" for state in wifi.values()]
-    elif all(state == "ok" for state in wifi.values()):
-        shown = ["wifi ok"] if wifi else []
+        (state,) = wifi.values()
+        shown = [f"wifi {state}"]
+    elif wifi and all(state == "ok" for state in wifi.values()):
+        shown = ["wifi ok"]
     else:
-        band = {"wlan_mon1": "2g"}
-        shown = [f"{band.get(name, '5g')} {state}" for name, state in wifi.items() if state != "ok"]
+        shown = [f"{WIFI_BANDS.get(name, name)} {state}" for name, state in wifi.items() if state != "ok"]
     return " ".join([*bt, *shown])
 
 
