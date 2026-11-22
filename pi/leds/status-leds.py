@@ -2,11 +2,11 @@
 """LED2 from what Kismet hears, LED3 from the SoC's temperature (LED1 is the
 kernel's: setup-leds.sh).
 
-- LED2 alternates red and white while Kismet heard a Flock ALPR camera or an
-  Axon device (body camera?) in the last WINDOW seconds, blue and white while
-  it heard a follows-me candidate (wigle-sync#83: an address in follows.txt,
-  which wigle-sync writes at home), and is off otherwise. Flock and Axon win
-  when both are near.
+- LED2 alternates red and white while Kismet heard a Flock Safety device, a
+  Flock Raven, a ShotSpotter sensor or an Axon device (body camera?) in the
+  last WINDOW seconds, blue and white while it heard a follows-me candidate
+  (wigle-sync#83: an address in follows.txt, which wigle-sync writes at home),
+  and is off otherwise. The red and white wins when both are near.
 - LED3 shows how hot the Pi is: green when cool (as after a boot), yellow
   when warm, orange when it has run hot for a while (the average, so a brief
   dip doesn't turn it yellow), and flashing red close to the firmware's hard
@@ -15,10 +15,12 @@ kernel's: setup-leds.sh).
   reading on the line doesn't flicker between two colours.
 
 Every few seconds this asks Kismet's REST API on localhost for the devices it
-heard in the last WINDOW seconds, and reads the temperature. Flock and Axon
-come from detect.py's rules (the same ones the sync counts drives with, so the
-two can't drift apart). When Kismet isn't running (at home it stops after 15
-minutes) nothing is near, LED2 is off, and this keeps asking.
+heard in the last WINDOW seconds, and reads the temperature. What alerts
+comes from detect.py's rules (the same ones the sync counts drives with, so the
+two can't drift apart), given Kismet's Bluetooth service UUIDs and company ID
+too, which the .wiglecsv the sync reads doesn't have (wigle-sync#85). When
+Kismet isn't running (at home it stops after 15 minutes) nothing is near,
+LED2 is off, and this keeps asking.
 
 LED3's red and green are on the kernel's software PWM, one pwm-gpio overlay
 per pin (none of them has hardware PWM), so they mix into yellow and orange;
@@ -48,6 +50,7 @@ from pathlib import Path
 import structlog
 
 from detect import kind_of
+from detect import LED2_KINDS as ALERT_KINDS
 
 KISMET = "http://127.0.0.1:2501"
 WINDOW = 60  # seconds a device counts as near after Kismet last heard it
@@ -64,7 +67,6 @@ HYSTERESIS = 2.0  # °C under a threshold before its level clears
 LEVELS = ("green", "yellow", "orange", "red")
 # LED3's red and green duty per level; the modules' green is the brighter.
 COLOURS = {"green": (0.0, 1.0), "yellow": (1.0, 0.5), "orange": (1.0, 0.15), "red": (1.0, 0.0)}
-ALERT_KINDS = {"flock", "axon"}
 FOLLOWS = Path("/var/log/kismet/follows.txt")  # wigle-sync's follows-me candidates, one address per line
 CHIP = "/dev/gpiochip0"
 LED2_RED, LED2_GREEN, LED2_BLUE = 5, 6, 13
@@ -75,6 +77,8 @@ FIELDS = [
     "kismet.device.base.macaddr",
     "kismet.device.base.commonname",
     "kismet.device.base.phyname",
+    ["bluetooth.device/bluetooth.device.service_uuid_strs", "services"],
+    ["bluetooth.device/bluetooth.device.manuf_company_id", "company"],
 ]
 
 
@@ -104,7 +108,7 @@ def kinds_near(devices: list[dict], follows: frozenset[str] = frozenset()) -> se
     for d in devices:
         mac = d.get("kismet.device.base.macaddr", "")
         phy = "WIFI" if d.get("kismet.device.base.phyname") == "IEEE802.11" else "BT"
-        kind = kind_of(mac, d.get("kismet.device.base.commonname", ""), phy)
+        kind = kind_of(mac, d.get("kismet.device.base.commonname", ""), phy, d.get("services") or (), d.get("company"))
         if kind in ALERT_KINDS:
             found.add(kind)
         if mac.upper() in follows:
@@ -113,7 +117,7 @@ def kinds_near(devices: list[dict], follows: frozenset[str] = frozenset()) -> se
 
 
 def led2_alert(near: set[str]) -> str | None:
-    """LED2's alert for what's near: "detect" (Flock, Axon), "follows", or None."""
+    """LED2's alert for what's near: "detect" (ALERT_KINDS), "follows", or None."""
     if near & ALERT_KINDS:
         return "detect"
     return "follows" if "follows" in near else None

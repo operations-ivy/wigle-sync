@@ -6,7 +6,7 @@ report per file: two Kismet sessions on one outing are two reports.
 
 What the CSV supports, and what it doesn't:
 - Kismet writes one row per sighting, with the time (UTC) and the GPS fix.
-- LED2 (pi/leds/status-leds.py) lights while a Flock or Axon device was heard
+- LED2 (pi/leds/status-leds.py) lights while a detect.LED2_KINDS device was heard
   in the last 60 s, so its on-time is rebuilt from those devices' rows.
 - RSSI 0 means Kismet had no reading (every Bluetooth row so far), so it's
   skipped.
@@ -34,8 +34,7 @@ from pathlib import Path
 
 import detect
 
-# status-leds.py: ALERT_KINDS and WINDOW.
-LED2_KINDS = {"flock", "axon"}
+# status-leds.py's WINDOW.
 LED2_WINDOW = 60
 TYPES = {"WIFI": "wifi", "BLE": "ble", "BT": "bt"}
 RSSI_BINS = list(range(-110, -10, 10))  # each bin's lower edge, dBm
@@ -161,7 +160,7 @@ def build_text(name: str, text: str) -> dict | None:
 
         what = detect.kind_of(mac, label, r["Type"])
         if what:
-            if what in LED2_KINDS:
+            if what in detect.LED2_KINDS:
                 led2_times.append(r["_t"])
             d = found.setdefault(
                 mac,

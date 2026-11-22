@@ -14,22 +14,39 @@ leds = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(leds)
 
 
-def device(mac, name, phy="IEEE802.11", type_="Wi-Fi AP"):
+def device(mac, name, phy="IEEE802.11", type_="Wi-Fi AP", **extra):
+    """A Kismet record as recent_devices() asks for it (FIELDS, with its aliases)."""
     return {
         "kismet.device.base.key": f"{phy}_{mac}",
         "kismet.device.base.type": type_,
         "kismet.device.base.macaddr": mac,
         "kismet.device.base.commonname": name,
         "kismet.device.base.phyname": phy,
+        **extra,
     }
 
 
 def test_flock_ssid_alerts():
-    assert leds.kinds_near([device("B4:1E:52:00:00:01", "Flock-1A2B3C")]) == {"flock"}
+    assert leds.kinds_near([device("AA:BB:CC:00:00:01", "Flock-1A2B3C")]) == {"flock"}
 
 
-def test_flock_name_on_bluetooth_does_not():
-    assert leds.kinds_near([device("B4:1E:52:00:00:01", "Flock-1A2B3C", "Bluetooth")]) == set()
+def test_flock_ssid_on_bluetooth_does_not():
+    assert leds.kinds_near([device("AA:BB:CC:00:00:01", "Flock-1A2B3C", "Bluetooth")]) == set()
+
+
+def test_bluetooth_services_and_company_reach_the_rules():
+    battery = device("C1:22:33:44:55:66", "1234567890", "Bluetooth", services=["fff0"], company="09c8")
+    raven = device("D1:22:33:44:55:66", "", "Bluetooth", services=["3100", "3400", "180f"], company=None)
+    assert leds.kinds_near([battery]) == {"flock"}
+    assert leds.kinds_near([raven]) == {"raven"}
+    assert leds.led2_alert(leds.kinds_near([raven])) == "detect"
+    # Kismet leaves out a field the device doesn't have (Wi-Fi ones have neither)
+    assert leds.kinds_near([device("C1:22:33:44:55:66", "1234567890", "Bluetooth")]) == set()
+
+
+def test_the_fields_ask_kismet_for_services_and_company():
+    aliases = {f[1] for f in leds.FIELDS if isinstance(f, list)}
+    assert aliases == {"services", "company"}
 
 
 def test_axon_oui_alerts_on_either_phy():
