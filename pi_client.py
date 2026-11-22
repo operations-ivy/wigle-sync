@@ -153,12 +153,13 @@ class PiClient:
 
     def list_archived(self, extension: str) -> list[RemoteFile]:
         """The files already synced, in the archive dir, oldest first."""
+        archive_dir = self.settings.pi_archive_dir
         try:
-            entries = self.sftp.listdir_attr(self.settings.pi_archive_dir)
+            entries = self.sftp.listdir_attr(archive_dir)
         except FileNotFoundError:
             return []
         files = [
-            RemoteFile(e.filename, posixpath.join(self.settings.pi_archive_dir, e.filename), e.st_size, e.st_mtime)
+            RemoteFile(name=e.filename, path=posixpath.join(archive_dir, e.filename), size=e.st_size, mtime=e.st_mtime)
             for e in entries
             if e.filename.endswith(extension) and e.st_mode is not None and stat.S_ISREG(e.st_mode)
         ]

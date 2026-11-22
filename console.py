@@ -63,8 +63,8 @@ def _refresh_follows() -> None:
     while True:
         try:
             _follows = follows.latest_candidates(KAFKA_BOOTSTRAP) or {}
-        except Exception as e:
-            log.warning("Follows-me candidates unreadable", error=str(e))
+        except Exception as e:  # any Kafka or parse failure: the thread must keep going
+            log.warning("Follows-me candidates unreadable", error=str(e), exc_info=True)
             _follows = {"error": str(e)}
         time.sleep(FOLLOWS_REFRESH_SECONDS)
 

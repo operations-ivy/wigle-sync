@@ -30,7 +30,9 @@ import os
 import statistics
 import time
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
+from itertools import combinations
 from typing import Any
 from typing import NamedTuple
 
@@ -106,7 +108,7 @@ def sightings(text: str, drive: str) -> list[Sighting]:
         if not kind or not detect.globally_administered(mac):
             continue
         lat, lon = report.to_float(row.get("CurrentLatitude")), report.to_float(row.get("CurrentLongitude"))
-        if not lat and not lon:
+        if not lat and not lon:  # Kismet writes 0,0 (or nothing) without a fix
             continue
         fix = Fix(row["_t"], lat, lon)
         seen = found.setdefault(mac, {"kind": kind, "name": "", "first": fix, "last": fix})
@@ -126,7 +128,7 @@ def parse_point(value: str) -> tuple[float, float] | None:
 
 def parse_macs(value: str) -> frozenset[str]:
     """Comma, space or newline separated addresses, upper case."""
-    return frozenset(m.strip().upper() for m in value.replace(",", " ").split() if m.strip())
+    return frozenset(m.upper() for m in value.replace(",", " ").split())
 
 
 @dataclass(frozen=True)
@@ -189,49 +191,61 @@ class History:
         for mac, drives in self.devices.items():
             if mac in skip or len(drives) < rules.min_trips:
                 continue
-            away = [
-                (s, points)
-                for s in drives.values()
-                if (points := [f for f in (s.first, s.last) if home is None or _km(f, home) > rules.home_km])
-            ]
-            if not away:
-                continue
-            away.sort(key=lambda sp: sp[0].first.t)
-            trips, last_end = 0, None
-            for s, _ in away:
-                if last_end is None or s.first.t - last_end > rules.trip_gap:
-                    trips += 1
-                last_end = max(last_end or 0, s.last.t)
+            away = _away(drives.values(), home, rules.home_km)
+            trips = _count_trips([s for s, _ in away], rules.trip_gap)
             if trips < rules.min_trips:
                 continue
-            points = [p for _, ps in away for p in ps]
-            spread = (
-                max(_km(a, (b.lat, b.lon)) for i, a in enumerate(points) for b in points[i + 1 :])
-                if len(points) > 1
-                else 0
-            )
+            spread = _spread_km([p for _, ps in away for p in ps])
             if spread < rules.min_km:
                 continue
-            latest = away[-1][0]
-            found.append(
-                {
-                    "mac": mac,
-                    "kind": latest.kind,
-                    "name": next((s.name for s, _ in reversed(away) if s.name), ""),
-                    "trips": trips,
-                    "spread_km": round(spread, 1),
-                    "last_seen": latest.last.t,
-                    "seen": [
-                        {
-                            "start": s.first.t,
-                            "end": s.last.t,
-                            "places": [[round(p.lat, 4), round(p.lon, 4)] for p in ps],
-                        }
-                        for s, ps in away
-                    ],
-                }
-            )
+            found.append(_candidate(mac, away, trips, spread))
         return sorted(found, key=lambda c: -c["last_seen"])
+
+
+Away = list[tuple[Sighting, list[Fix]]]
+
+
+def _away(sightings: Iterable[Sighting], home: tuple[float, float] | None, home_km: float) -> Away:
+    """Each sighting with its fixes more than home_km from home, oldest first;
+    sightings only at home are left out."""
+    away = [
+        (s, points)
+        for s in sightings
+        if (points := [f for f in (s.first, s.last) if home is None or _km(f, home) > home_km])
+    ]
+    return sorted(away, key=lambda sp: sp[0].first.t)
+
+
+def _count_trips(sightings: list[Sighting], gap: float) -> int:
+    """Separate trips among sightings sorted by start: one that starts more
+    than `gap` seconds after the ones before it ended is a new trip."""
+    trips, last_end = 0, float("-inf")
+    for s in sightings:
+        if s.first.t - last_end > gap:
+            trips += 1
+        last_end = max(last_end, s.last.t)
+    return trips
+
+
+def _spread_km(points: list[Fix]) -> float:
+    """The greatest distance between any two fixes."""
+    return max((_km(a, (b.lat, b.lon)) for a, b in combinations(points, 2)), default=0.0)
+
+
+def _candidate(mac: str, away: Away, trips: int, spread: float) -> dict[str, Any]:
+    latest = away[-1][0]
+    return {
+        "mac": mac,
+        "kind": latest.kind,
+        "name": next((s.name for s, _ in reversed(away) if s.name), ""),
+        "trips": trips,
+        "spread_km": round(spread, 1),
+        "last_seen": latest.last.t,
+        "seen": [
+            {"start": s.first.t, "end": s.last.t, "places": [[round(p.lat, 4), round(p.lon, 4)] for p in ps]}
+            for s, ps in away
+        ],
+    }
 
 
 class NullFollows:
@@ -306,6 +320,7 @@ class Follows(NullFollows):
             "candidates": candidates,
         }
         self._producer.produce(FOLLOWS_TOPIC, key=FOLLOWS_KEY, value=json.dumps(value))
+        self._producer.poll(0)
 
     def abandon(self) -> None:
         self._producer.purge()

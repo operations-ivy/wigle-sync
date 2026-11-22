@@ -116,7 +116,16 @@ def test_a_drive_sent_twice_is_one_sighting():
         h.add(s)
     assert len(h.devices[TRACKER]) == 1
     h.forget(f"{TRACKER}|drive0")
-    assert len(h.devices[TRACKER]) == 0
+    assert not h.devices[TRACKER]
+
+
+def test_trips_and_spread_on_their_own():
+    def at(t, lat):
+        return follows.Sighting("M", f"d{t}", "ble", "", follows.Fix(t, lat, -75.0), follows.Fix(t + 60, lat, -75.0))
+
+    assert follows._count_trips([at(0, 40.1), at(600, 40.1), at(DAY, 40.2)], gap=3600) == 2
+    assert follows._spread_km([]) == 0.0
+    assert round(follows._spread_km([follows.Fix(0, 40.0, -75.0), follows.Fix(1, 40.1, -75.0)]), 1) == 11.1
 
 
 def test_rules_from_the_environment(monkeypatch):
