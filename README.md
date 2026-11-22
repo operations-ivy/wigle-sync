@@ -94,12 +94,14 @@ the USB chip rather than a MAC, so swapping a dongle keeps its name:
 | `wlan_mon0` | RTL8821CU (`0bda:c811`) or TP-Link Archer T2U Nano (RTL8811AU, `2357:011e`, `rtw88_8821au`): one of them | Kismet's capture source (5 GHz with `WIFI_SPLIT=1`) |
 | `wlan_mon1` | RTL8188EUS (`0bda:8179`), only with `WIFI_SPLIT=1` | Kismet's 2.4 GHz capture source |
 
-Kismet also captures from a long-range USB Bluetooth dongle (`hci0`), so BT and
-BLE devices go into the `.wiglecsv` alongside Wi-Fi. The onboard Bluetooth is off
-(`dtoverlay=disable-bt`, added by `bootstrap.sh`): it shared a chip and antenna
-with `wlan_host`, and with it off the dongle is always `hci0`. `bootstrap.sh`
-unblocks the adapter if it comes up soft-blocked, and checks that `hci0` is the
-USB one (`btusb`); `pi_bt_dongle` says the same on the brick69 dashboard.
+Kismet also captures from Bluetooth (`hci0`), so BT and BLE devices go into the
+`.wiglecsv` alongside Wi-Fi. `hci0` is the onboard chip (`BT_ONBOARD=1`, the
+default on a zero2w; brick69 since 2026-11-21, when its UB500 dongle came out)
+or a USB dongle with the onboard one off (`dtoverlay=disable-bt`, added by
+`bootstrap.sh`), so the dongle is always `hci0`. The onboard chip shares its
+antenna with `wlan_host`. `bootstrap.sh` unblocks the adapter if it comes up
+soft-blocked and checks that `hci0` is the one chosen; `pi_bt_dongle` (1 for a
+dongle, 0 onboard) says which on the brick69 dashboard.
 
 **Two capture radios, one per band** (`WIFI_SPLIT=1` in `/etc/default/kismet-pi`,
 the user, 2026-11-20): a 2.4 GHz dongle as `wlan_mon1` takes 2.4 GHz and
@@ -108,7 +110,11 @@ the move as with one radio hopping both bands. `bootstrap.sh` installs Kismet's
 Wi-Fi sources as `/etc/kismet/kismet_wifi.conf` (`pi/kismet/wifi-split.conf`;
 `wifi-one.conf` without the setting) and checks `wlan_mon1`. A new `.link`
 only renames a radio once it's re-plugged or the Pi reboots. Another 2.4 GHz
-model needs its own `.link` beside `10-wlan_mon1.link`. On the e-ink screen
+model needs its own `.link` beside `10-wlan_mon1.link`, or, for a model that
+another rule already names `wlan_mon0`, `WIFI_MON1_USB` (its `vendor:product`):
+`bootstrap.sh` writes `05-wlan_mon1-local.link`, which sorts first and wins. On
+brick69 (2026-11-21) the RTL8821CU, with its external antenna, is `wlan_mon0` on
+5 GHz and the T2U Nano `wlan_mon1` on 2.4 GHz. On the e-ink screen
 a radio that isn't ok shows by band (`2G ERR`, `5G OFF`).
 
 The Pi Zero 2 W handheld (the `zero2w` profile) uses its **onboard** Bluetooth

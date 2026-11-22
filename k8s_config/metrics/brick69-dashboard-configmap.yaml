@@ -760,8 +760,8 @@ data:
         },
         {
           "type": "stat",
-          "title": "Bluetooth dongle",
-          "description": "Kismet's hci0 is the long-range USB dongle (1), another adapter (0), or missing (no data).",
+          "title": "Bluetooth adapter",
+          "description": "Kismet's hci0: a USB dongle (1), the onboard chip (0, brick69 since 2026-11-21), or missing (no data).",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -789,12 +789,12 @@ data:
                   "type": "value",
                   "options": {
                     "0": {
-                      "text": "Not the dongle",
-                      "color": "orange",
+                      "text": "Onboard",
+                      "color": "green",
                       "index": 0
                     },
                     "1": {
-                      "text": "Dongle",
+                      "text": "USB dongle",
                       "color": "green",
                       "index": 1
                     }

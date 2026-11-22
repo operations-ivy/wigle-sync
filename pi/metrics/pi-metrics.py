@@ -90,9 +90,9 @@ def gps(timeout=3.0):
 
 
 def bt_dongle(uevent="/sys/class/bluetooth/hci0/device/uevent"):
-    """1 when hci0 is a USB adapter (the long-range dongle), 0 when it's
-    something else (the onboard chip, if disable-bt didn't take), None when
-    there's no hci0 at all."""
+    """1 when hci0 is a USB adapter (a long-range dongle), 0 when it's
+    something else (the onboard chip: BT_ONBOARD=1, or disable-bt didn't
+    take), None when there's no hci0 at all."""
     try:
         with open(uevent) as f:
             return int("DRIVER=btusb" in f.read().split())
@@ -191,7 +191,7 @@ def render():
     mode, used = gps()
     gauge("pi_gps_fix_mode", "gpsd's fix: 0 unknown, 1 none, 2 2D, 3 3D.", mode)
     gauge("pi_gps_satellites_used", "Satellites in the fix.", used)
-    gauge("pi_bt_dongle", "1 while Kismet's hci0 is the USB Bluetooth dongle, 0 if it's another adapter.", bt_dongle())
+    gauge("pi_bt_dongle", "1 while Kismet's hci0 is a USB Bluetooth dongle, 0 while it's the onboard chip.", bt_dongle())
     gauge("pi_home_wifi", "1 while the Pi is on the home Wi-Fi.", home())
     login = kismet_login() if log_bytes is not None else None
     if login:
