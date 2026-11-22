@@ -1,0 +1,9 @@
+# Kismet's 5 GHz capture radio, second model: a TP-Link Archer T2U Nano
+# (RTL8811AU, in-kernel rtw88_8821au), matched by USB ID so it takes the name
+# kismet_site.conf uses (source=wlan_mon0), like the RTL8821CU in
+# 10-wlan_mon0.link. Plug in one or the other, not both.
+[Match]
+Property=ID_VENDOR_ID=2357 ID_MODEL_ID=011e
+
+[Link]
+Name=wlan_mon0
