@@ -68,8 +68,8 @@ KINDS = {
 }
 FLOCK_OUI = "B4:1E:52"
 FLOCK_SSID = re.compile(r"^Flock-[0-9A-Fa-f]{6}$|^Flock Camera net")
-FLOCK_BATTERY = re.compile(r"^(FS Ext Battery|Penguin-\d{10})$")
-PENGUIN_SERIAL = re.compile(r"^\d{10}$")  # newer Penguin firmware: with FLOCK_COMPANY only
+FLOCK_BATTERY = re.compile(r"^(FS Ext Battery|Penguin-[0-9]{10})$")
+PENGUIN_SERIAL = re.compile(r"^[0-9]{10}$")  # newer Penguin firmware: with FLOCK_COMPANY only
 FLOCK_COMPANY = "09c8"
 FLOCK_SERVICE = "e8ccbb38-9532-46a8-9fe5-1814df172e6f"
 RAVEN_SERVICES = {"3100", "3200", "3300", "3400", "3500"}
@@ -88,7 +88,7 @@ def globally_administered(mac: str) -> bool:
         return False
 
 
-def kind_of(mac: str, name: str, kind: str, services: Iterable[str] = (), company: str | None = None) -> str | None:
+def kind_of(mac: str, name: str, kind: str, *, services: Iterable[str] = (), company: str | None = None) -> str | None:
     """The kind of one device, or None: a .wiglecsv row (Type WIFI, BT or BLE)
     or a Kismet record, which adds a Bluetooth device's service UUIDs (16-bit
     ones as 4 hex digits) and its company ID (4 hex digits)."""

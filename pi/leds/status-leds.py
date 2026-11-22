@@ -50,7 +50,7 @@ from pathlib import Path
 import structlog
 
 from detect import kind_of
-from detect import LED2_KINDS as ALERT_KINDS
+from detect import LED2_KINDS
 
 KISMET = "http://127.0.0.1:2501"
 WINDOW = 60  # seconds a device counts as near after Kismet last heard it
@@ -108,8 +108,9 @@ def kinds_near(devices: list[dict], follows: frozenset[str] = frozenset()) -> se
     for d in devices:
         mac = d.get("kismet.device.base.macaddr", "")
         phy = "WIFI" if d.get("kismet.device.base.phyname") == "IEEE802.11" else "BT"
-        kind = kind_of(mac, d.get("kismet.device.base.commonname", ""), phy, d.get("services") or (), d.get("company"))
-        if kind in ALERT_KINDS:
+        name = d.get("kismet.device.base.commonname", "")
+        kind = kind_of(mac, name, phy, services=d.get("services") or (), company=d.get("company"))
+        if kind in LED2_KINDS:
             found.add(kind)
         if mac.upper() in follows:
             found.add("follows")
@@ -117,8 +118,8 @@ def kinds_near(devices: list[dict], follows: frozenset[str] = frozenset()) -> se
 
 
 def led2_alert(near: set[str]) -> str | None:
-    """LED2's alert for what's near: "detect" (ALERT_KINDS), "follows", or None."""
-    if near & ALERT_KINDS:
+    """LED2's alert for what's near: "detect" (LED2_KINDS), "follows", or None."""
+    if near & LED2_KINDS:
         return "detect"
     return "follows" if "follows" in near else None
 

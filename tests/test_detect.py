@@ -52,12 +52,12 @@ def test_flock_signatures():
     assert detect.kind_of("C1:22:33:44:55:66", "FS Ext Battery", "BLE") == "flock"
     assert detect.kind_of("C1:22:33:44:55:66", "Penguin-1234567890", "BT") == "flock"
     assert detect.kind_of("C1:22:33:44:55:66", "1234567890", "BLE", company="09C8") == "flock"
-    assert detect.kind_of("C1:22:33:44:55:66", "", "BLE", ["E8CCBB38-9532-46A8-9FE5-1814DF172E6F"]) == "flock"
+    assert detect.kind_of("C1:22:33:44:55:66", "", "BLE", services=["E8CCBB38-9532-46A8-9FE5-1814DF172E6F"]) == "flock"
 
 
 def test_raven_and_shotspotter():
-    assert detect.kind_of("D1:22:33:44:55:66", "", "BLE", ["3100", "3500"]) == "raven"
-    assert detect.kind_of("D1:22:33:44:55:66", "", "BLE", ["3100"]) is None  # one 16-bit UUID can be anyone's
+    assert detect.kind_of("D1:22:33:44:55:66", "", "BLE", services=["3100", "3500"]) == "raven"
+    assert detect.kind_of("D1:22:33:44:55:66", "", "BLE", services=["3100"]) is None  # one 16-bit UUID can be anyone's
     assert detect.kind_of("D4:11:D6:12:34:56", "", "WIFI") == "shotspotter"
     assert detect.alerting(Counter({"raven": 1, "shotspotter": 1})) == Counter({"raven": 1, "shotspotter": 1})
 
