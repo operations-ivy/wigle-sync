@@ -50,40 +50,40 @@ GAP_SECONDS = 300
 _OCTAL = re.compile(rb"(?:\\[0-7]{3})+")
 
 
-def _name(value: str | None) -> str:
+def decode_name(value: str | None) -> str:
     raw = (value or "").strip().encode("utf-8", "surrogateescape")
     return _OCTAL.sub(lambda m: bytes(int(o, 8) for o in m.group().split(b"\\")[1:]), raw).decode("utf-8", "replace")
 
 
-def _epoch(value: str) -> float | None:
+def epoch(value: str) -> float | None:
     try:
         return datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp()
     except (TypeError, ValueError):
         return None
 
 
-def _float(value: str | None) -> float | None:
+def to_float(value: str | None) -> float | None:
     try:
         return float(value) if value else None
     except ValueError:
         return None
 
 
-def _metres(a: tuple[float, float], b: tuple[float, float]) -> float:
+def metres(a: tuple[float, float], b: tuple[float, float]) -> float:
     lat1, lon1, lat2, lon2 = map(math.radians, (*a, *b))
     h = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
     return 2 * 6_371_000 * math.asin(math.sqrt(h))
 
 
-def _rows(text: str) -> tuple[list[dict], int]:
+def parse_rows(text: str) -> tuple[list[dict], int]:
     """The CSV's whole rows, and how many partial ones were dropped."""
     lines = text.replace("\0", "").splitlines()
     rows, partial = [], 0
     for row in csv.DictReader(io.StringIO("\n".join(lines[1:]))):
-        if row.get("Type") not in TYPES or _epoch(row.get("FirstSeen")) is None:
+        if row.get("Type") not in TYPES or epoch(row.get("FirstSeen")) is None:
             partial += 1
             continue
-        row["_t"] = _epoch(row["FirstSeen"])
+        row["_t"] = epoch(row["FirstSeen"])
         rows.append(row)
     return rows, partial
 
@@ -109,7 +109,7 @@ def _sighting_buckets(counts: Counter) -> list[dict]:
 
 def build_text(name: str, text: str) -> dict | None:
     """The report for a .wiglecsv's text, or None when it has no whole rows."""
-    rows, partial = _rows(text)
+    rows, partial = parse_rows(text)
     if not rows:
         return None
     rows.sort(key=lambda r: r["_t"])
@@ -130,19 +130,19 @@ def build_text(name: str, text: str) -> dict | None:
     distance, last_fix = 0.0, None
 
     for r in rows:
-        kind, mac, label = TYPES[r["Type"]], r["MAC"].upper(), _name(r.get("SSID"))
+        kind, mac, label = TYPES[r["Type"]], r["MAC"].upper(), decode_name(r.get("SSID"))
         minute = int((r["_t"] - first_minute) // 60)
         per_minute[kind][minute] += 1
         if mac not in sightings[kind]:
             new_per_minute[kind][minute] += 1
         sightings[kind][mac] += 1
 
-        level = _float(r.get("RSSI"))
+        level = to_float(r.get("RSSI"))
         if level and level < 0:
             rssi[kind][min(max(int((level - RSSI_BINS[0]) // 10), 0), len(RSSI_BINS) - 1)] += 1
 
         if kind == "wifi":
-            channel = int(_float(r.get("Channel")) or 0)
+            channel = int(to_float(r.get("Channel")) or 0)
             if channel and mac not in channel_seen:
                 channel_seen.add(mac)
                 channels["2.4" if channel <= 14 else "5"][str(channel)] += 1
@@ -150,11 +150,11 @@ def build_text(name: str, text: str) -> dict | None:
                 ssids.setdefault(label, set()).add(mac)
                 ssid_rows[label] += 1
 
-        lat, lon = _float(r.get("CurrentLatitude")), _float(r.get("CurrentLongitude"))
+        lat, lon = to_float(r.get("CurrentLatitude")), to_float(r.get("CurrentLongitude"))
         if lat and lon:
             fix = (r["_t"], (lat, lon))
             if last_fix and fix[1] != last_fix[1]:
-                step = _metres(last_fix[1], fix[1])
+                step = metres(last_fix[1], fix[1])
                 if step <= MAX_SPEED_MPS * max(fix[0] - last_fix[0], 1):
                     distance += step
             last_fix = fix

@@ -132,8 +132,27 @@ def test_every_level_has_a_colour():
     assert set(leds.COLOURS) == set(leds.LEVELS)
 
 
-def test_demo_shows_every_level_then_the_alert():
+def test_demo_shows_every_level_then_both_alerts():
     states = leds.demo_states()
-    assert [level for _, _, level in states[:-1]] == list(leds.LEVELS)
-    assert not any(near for _, near, _ in states[:-1])
-    assert states[-1] == ("LED2 alert", True, None)
+    assert [level for _, _, level in states[:-2]] == list(leds.LEVELS)
+    assert not any(alert for _, alert, _ in states[:-2])
+    assert states[-2:] == [("LED2 alert", "detect", None), ("LED2 follows-me", "follows", None)]
+
+
+def test_a_follows_me_candidate_near_is_its_own_alert(tmp_path):
+    listed = tmp_path / "follows.txt"
+    listed.write_text("aa:bb:cc:00:00:01\n\n")
+    follows = leds.read_follows(listed)
+    assert follows == {"AA:BB:CC:00:00:01"}
+    near = leds.kinds_near([device("AA:BB:CC:00:00:01", "", "Bluetooth")], follows)
+    assert near == {"follows"} and leds.led2_alert(near) == "follows"
+    assert leds.kinds_near([device("AA:BB:CC:00:00:02", "", "Bluetooth")], follows) == set()
+
+
+def test_flock_and_axon_win_over_a_follows_me_candidate():
+    assert leds.led2_alert({"follows", "flock"}) == "detect"
+    assert leds.led2_alert(set()) is None
+
+
+def test_no_follows_file_means_no_candidates(tmp_path):
+    assert leds.read_follows(tmp_path / "missing") == frozenset()

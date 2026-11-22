@@ -3,7 +3,10 @@
 kernel's: setup-leds.sh).
 
 - LED2 alternates red and white while Kismet heard a Flock ALPR camera or an
-  Axon device (body camera?) in the last WINDOW seconds, and is off otherwise.
+  Axon device (body camera?) in the last WINDOW seconds, blue and white while
+  it heard a follows-me candidate (wigle-sync#83: an address in follows.txt,
+  which wigle-sync writes at home), and is off otherwise. Flock and Axon win
+  when both are near.
 - LED3 shows how hot the Pi is: green when cool (as after a boot), yellow
   when warm, orange when it has run hot for a while (the average, so a brief
   dip doesn't turn it yellow), and flashing red close to the firmware's hard
@@ -62,6 +65,7 @@ LEVELS = ("green", "yellow", "orange", "red")
 # LED3's red and green duty per level; the modules' green is the brighter.
 COLOURS = {"green": (0.0, 1.0), "yellow": (1.0, 0.5), "orange": (1.0, 0.15), "red": (1.0, 0.0)}
 ALERT_KINDS = {"flock", "axon"}
+FOLLOWS = Path("/var/log/kismet/follows.txt")  # wigle-sync's follows-me candidates, one address per line
 CHIP = "/dev/gpiochip0"
 LED2_RED, LED2_GREEN, LED2_BLUE = 5, 6, 13
 LED3_RED, LED3_GREEN, LED3_BLUE = 17, 27, 22
@@ -84,15 +88,35 @@ def credentials(path: Path) -> tuple[str, str]:
     return conf["httpd_username"], conf["httpd_password"]
 
 
-def kinds_near(devices: list[dict]) -> set[str]:
-    """The alerting kinds among Kismet's device records."""
+def read_follows(path: Path = FOLLOWS) -> frozenset[str]:
+    """The follows-me candidates' addresses, upper case; none without the file."""
+    try:
+        text = path.read_text()
+    except OSError:
+        return frozenset()
+    return frozenset(line.strip().upper() for line in text.splitlines() if line.strip())
+
+
+def kinds_near(devices: list[dict], follows: frozenset[str] = frozenset()) -> set[str]:
+    """The alerting kinds among Kismet's device records, and "follows" for a
+    follows-me candidate."""
     found = set()
     for d in devices:
+        mac = d.get("kismet.device.base.macaddr", "")
         phy = "WIFI" if d.get("kismet.device.base.phyname") == "IEEE802.11" else "BT"
-        kind = kind_of(d.get("kismet.device.base.macaddr", ""), d.get("kismet.device.base.commonname", ""), phy)
+        kind = kind_of(mac, d.get("kismet.device.base.commonname", ""), phy)
         if kind in ALERT_KINDS:
             found.add(kind)
+        if mac.upper() in follows:
+            found.add("follows")
     return found
+
+
+def led2_alert(near: set[str]) -> str | None:
+    """LED2's alert for what's near: "detect" (Flock, Axon), "follows", or None."""
+    if near & ALERT_KINDS:
+        return "detect"
+    return "follows" if "follows" in near else None
 
 
 def heat_level(now: float, average: float, previous: str | None = None) -> str:
@@ -173,13 +197,16 @@ class Leds:
         )
         self.red3, self.green3 = (Fader(pwm_chip(pin)) for pin in (LED3_RED, LED3_GREEN))
 
-    def show(self, near: bool, level: str | None, now: float) -> None:
-        """LED2's alert if near, LED3 in level's colour (off for None)."""
+    def show(self, alert: str | None, level: str | None, now: float) -> None:
+        """LED2's alert ("detect": red and white, "follows": blue and white),
+        LED3 in level's colour (off for None)."""
         on, off = self.on, self.off
         flash = int(now / FLASH) % 2 == 1
-        if near:
+        if alert:
             white = on if flash else off
-            self.lines.set_values({LED2_RED: on, LED2_GREEN: white, LED2_BLUE: white, LED3_BLUE: off})
+            red = on if alert == "detect" or flash else off
+            blue = on if alert == "follows" or flash else off
+            self.lines.set_values({LED2_RED: red, LED2_GREEN: white, LED2_BLUE: blue, LED3_BLUE: off})
         else:
             self.lines.set_values({LED2_RED: off, LED2_GREEN: off, LED2_BLUE: off, LED3_BLUE: off})
         red, green = COLOURS[level] if level else (0.0, 0.0)
@@ -189,9 +216,12 @@ class Leds:
         self.green3.set(green)
 
 
-def demo_states() -> list[tuple[str, bool, str | None]]:
-    """What --test shows, in order: (label, LED2 alerting, LED3 level)."""
-    return [(f"LED3 {level}", False, level) for level in LEVELS] + [("LED2 alert", True, None)]
+def demo_states() -> list[tuple[str, str | None, str | None]]:
+    """What --test shows, in order: (label, LED2's alert, LED3 level)."""
+    return [(f"LED3 {level}", None, level) for level in LEVELS] + [
+        ("LED2 alert", "detect", None),
+        ("LED2 follows-me", "follows", None),
+    ]
 
 
 def run_test() -> None:
@@ -201,13 +231,13 @@ def run_test() -> None:
         subprocess.run(["systemctl", "stop", service], check=True)
     try:
         leds = Leds()
-        for label, near, level in demo_states():
+        for label, alert, level in demo_states():
             print(label, flush=True)
             end = time.monotonic() + TEST_HOLD
             while (now := time.monotonic()) < end:
-                leds.show(near, level, now)
+                leds.show(alert, level, now)
                 time.sleep(STEP)
-        leds.show(False, None, time.monotonic())
+        leds.show(None, None, time.monotonic())
     finally:
         if was_running:
             subprocess.run(["systemctl", "start", service], check=True)
@@ -250,7 +280,7 @@ def main() -> None:
             if up != kismet_up:
                 log.info("kismet answering" if up else "kismet not answering")
                 kismet_up = up
-            found = kinds_near(devices)
+            found = kinds_near(devices, read_follows())
             if found != near:
                 log.info("near", kinds=sorted(found))
                 near = found
@@ -262,7 +292,7 @@ def main() -> None:
                 if new != level:
                     log.info("heat", level=new, celsius=round(temperature, 1), average_celsius=round(average, 1))
                     level = new
-        leds.show(bool(near), level, now)
+        leds.show(led2_alert(near), level, now)
         time.sleep(STEP)
 
 

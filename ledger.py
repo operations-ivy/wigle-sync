@@ -18,6 +18,7 @@ import hashlib
 import json
 import logging
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +45,37 @@ def file_key(path: Path) -> str:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def read_topic(consumer: Consumer, topic: str, timeout: float) -> Iterator[tuple[str, bytes | None]]:
+    """Every keyed record of a topic, from the start to its end now, as (key,
+    value); a tombstone's value is None. Raises KafkaException or TimeoutError
+    when the topic can't be read in `timeout` seconds."""
+    meta = consumer.list_topics(topic, timeout=timeout).topics.get(topic)
+    if meta is None or meta.error is not None:
+        raise KafkaException(meta.error if meta else KafkaError(KafkaError.UNKNOWN_TOPIC_OR_PART))
+    parts = [TopicPartition(topic, p, OFFSET_BEGINNING) for p in meta.partitions]
+    # Partitions with nothing in them would never report EOF.
+    pending = set()
+    for tp in parts:
+        low, high = consumer.get_watermark_offsets(tp, timeout=timeout)
+        if high > low:
+            pending.add(tp.partition)
+    consumer.assign(parts)
+    deadline = time.monotonic() + timeout
+    while pending:
+        if time.monotonic() > deadline:
+            raise TimeoutError(f"reading {topic}: partitions {sorted(pending)} unfinished")
+        msg = consumer.poll(1.0)
+        if msg is None:
+            continue
+        if msg.error():
+            if msg.error().code() == KafkaError._PARTITION_EOF:
+                pending.discard(msg.partition())
+                continue
+            raise KafkaException(msg.error())
+        if msg.key():
+            yield msg.key().decode(), msg.value()
 
 
 class NullLedger:
@@ -91,39 +123,14 @@ class Ledger(NullLedger):
     def load(self) -> None:
         """Read the whole topic into states (newest record per key wins).
         Raises KafkaException or TimeoutError when Kafka can't be read."""
-        meta = self._consumer.list_topics(self.topic, timeout=self.timeout).topics.get(self.topic)
-        if meta is None or meta.error is not None:
-            raise KafkaException(meta.error if meta else KafkaError(KafkaError.UNKNOWN_TOPIC_OR_PART))
-        parts = [TopicPartition(self.topic, p, OFFSET_BEGINNING) for p in meta.partitions]
-        # Partitions with nothing in them would never report EOF.
-        pending = set()
-        for tp in parts:
-            low, high = self._consumer.get_watermark_offsets(tp, timeout=self.timeout)
-            if high > low:
-                pending.add(tp.partition)
-        self._consumer.assign(parts)
-        deadline = time.monotonic() + self.timeout
-        while pending:
-            if time.monotonic() > deadline:
-                raise TimeoutError(f"reading {self.topic}: partitions {sorted(pending)} unfinished")
-            msg = self._consumer.poll(1.0)
-            if msg is None:
-                continue
-            if msg.error():
-                if msg.error().code() == KafkaError._PARTITION_EOF:
-                    pending.discard(msg.partition())
-                    continue
-                raise KafkaException(msg.error())
-            key = msg.key().decode() if msg.key() else None
-            if key is None:
-                continue
-            if msg.value() is None:  # a tombstone: forgotten
+        for key, value in read_topic(self._consumer, self.topic, self.timeout):
+            if value is None:  # a tombstone: forgotten
                 self.states.pop(key, None)
-            else:
-                try:
-                    self.states[key] = json.loads(msg.value())
-                except ValueError:
-                    log.warning("Unreadable ledger record, ignoring it", key=key)
+                continue
+            try:
+                self.states[key] = json.loads(value)
+            except ValueError:
+                log.warning("Unreadable ledger record, ignoring it", key=key)
 
     def uploaded(self, key: str) -> dict[str, Any] | None:
         state = self.states.get(key)

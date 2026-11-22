@@ -189,3 +189,18 @@ def test_console_logs_each_request_as_fields(client):
         ("/health", 200, "debug"),
     ]
     assert requests[0]["method"] == "GET" and requests[0]["duration_ms"] >= 0
+
+
+def test_follows_me_is_a_panel_and_off_without_kafka(client):
+    page = client.get("/", headers={"Host": "wigle.brick.nozdormu.cloud"}).get_data(as_text=True)
+    order = [page.index(f'id="{panel}"') for panel in ("aa-panel", "fm-panel", "q-body")]
+    assert order == sorted(order)
+    assert client.get("/api/status").get_json()["follows"] is None
+
+
+def test_follows_me_shows_the_syncs_newest_list(client):
+    import console
+
+    latest = {"at": 1.0, "candidates": [{"mac": "0C:11:22:33:44:55"}]}
+    with mock.patch.object(console, "_follows", latest):
+        assert client.get("/api/status").get_json()["follows"] == latest

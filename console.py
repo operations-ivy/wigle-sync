@@ -8,18 +8,24 @@ from urllib.parse import urlsplit
 
 import brick_observe
 from flask import Flask
-from flask import Response
 from flask import jsonify
 from flask import render_template
 from flask import request
+from flask import Response
 
 import console_metrics
+import follows
 import radar
 import stats
+
 brick_observe.init("wigle-console")
 log = brick_observe.get_logger(__name__)
 brick_observe.instrument_requests(
-    {"wigle.net": "wigle", urlsplit(stats.LOKI_URL).hostname: "loki", urlsplit(stats.PROMETHEUS_URL).hostname: "prometheus"}
+    {
+        "wigle.net": "wigle",
+        urlsplit(stats.LOKI_URL).hostname: "loki",
+        urlsplit(stats.PROMETHEUS_URL).hostname: "prometheus",
+    }
 )
 
 app = Flask(__name__)
@@ -44,6 +50,27 @@ def _refresh_radar() -> None:
 
 
 threading.Thread(target=_refresh_radar, daemon=True).start()
+
+# The follows-me candidates (#83): the sync's newest list on wigle-sync.follows.
+# None without KAFKA_BOOTSTRAP (the panel says "off").
+FOLLOWS_REFRESH_SECONDS = 300
+KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP")
+_follows: dict | None = {"error": "loading"} if KAFKA_BOOTSTRAP else None
+
+
+def _refresh_follows() -> None:
+    global _follows
+    while True:
+        try:
+            _follows = follows.latest_candidates(KAFKA_BOOTSTRAP) or {}
+        except Exception as e:  # any Kafka or parse failure: the thread must keep going
+            log.warning("Follows-me candidates unreadable", error=str(e), exc_info=True)
+            _follows = {"error": str(e)}
+        time.sleep(FOLLOWS_REFRESH_SECONDS)
+
+
+if KAFKA_BOOTSTRAP:
+    threading.Thread(target=_refresh_follows, daemon=True).start()
 console_metrics.register_live(_radar, stats.wigle_cached)
 
 
@@ -63,13 +90,15 @@ def replay_page():
 def api_atlas():
     page = _radar.page_gz()
     if "gzip" in request.headers.get("Accept-Encoding", ""):
-        return Response(page, mimetype="application/json", headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
+        return Response(
+            page, mimetype="application/json", headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"}
+        )
     return Response(gzip.decompress(page), mimetype="application/json", headers={"Vary": "Accept-Encoding"})
 
 
 @app.route("/api/status")
 def api_status():
-    return jsonify(stats.collect())
+    return jsonify({**stats.collect(), "follows": _follows})
 
 
 @app.route("/health")
