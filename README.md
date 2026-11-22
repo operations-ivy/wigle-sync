@@ -91,7 +91,7 @@ the USB chip rather than a MAC, so swapping a dongle keeps its name:
 | Name | Radio | Job |
 | --- | --- | --- |
 | `wlan_host` | onboard (`brcmfmac`) | Joins home wifi; wigle-sync reaches the Pi through it |
-| `wlan_mon0` | RTL8821CU (`0bda:c811`) | Kismet's capture source |
+| `wlan_mon0` | RTL8821CU (`0bda:c811`) or TP-Link Archer T2U Nano (RTL8811AU, `2357:011e`, `rtw88_8821au`): one of them | Kismet's capture source (5 GHz with `WIFI_SPLIT=1`) |
 | `wlan_mon1` | RTL8188EUS (`0bda:8179`), only with `WIFI_SPLIT=1` | Kismet's 2.4 GHz capture source |
 
 Kismet also captures from a long-range USB Bluetooth dongle (`hci0`), so BT and
