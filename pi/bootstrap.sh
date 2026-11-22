@@ -203,7 +203,7 @@ if [[ ${WIFI_SPLIT:-0} == 1 ]]; then
     check "wlan_mon1 supports monitor mode" phy_supports wlan_mon1 monitor
     check "Kismet captures from wlan_mon1" grep -q "^source=wlan_mon1" /etc/kismet/kismet_wifi.conf
 fi
-if [[ -n ${KISMET_AP_SSID:-} ]]; then
+if [[ -n ${KISMET_AP_SSID:-${AP_SSID:-}} ]]; then  # AP_SSID: the old AP's name (pi/ap/setup-ap.sh)
     check "the phone AP profile exists (kismet-ap)" nmcli -t connection show kismet-ap
     check "kismet-ap-switch running" systemctl is-active kismet-ap-switch.service
     check "wlan_host can be an AP" phy_supports wlan_host AP

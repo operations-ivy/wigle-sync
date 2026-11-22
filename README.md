@@ -145,7 +145,8 @@ port 2501 first could choose it.
 Away from home, the onboard radio (`wlan_host`) becomes a phone AP, so Kismet's
 web UI is on the phone at `http://192.168.50.1:2501` (the user, 2026-11-21; it
 was an RTL8188EUS running hostapd until 2026-10-15). `KISMET_AP_SSID` and
-`KISMET_AP_PSK` in `/etc/default/kismet-pi` turn it on; `pi/ap/setup-ap.sh`
+`KISMET_AP_PSK` in `/etc/default/kismet-pi` turn it on (the old AP's `AP_SSID`
+and `AP_PASSPHRASE` count too); `pi/ap/setup-ap.sh`
 (run by `bootstrap.sh`) makes NetworkManager's `kismet-ap` profile (WPA2, 5 GHz
 channel 149 by default, DHCP for the phone) and starts `kismet-ap-switch`:
 

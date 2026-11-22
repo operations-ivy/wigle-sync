@@ -16,6 +16,13 @@ KISMET_USER=${KISMET_USER:-zaphod}
 LOG_DIR=${LOG_DIR:-/var/log/kismet}
 # shellcheck source=../kismet-pi.env.example
 . "$SETTINGS"
+# The old phone AP's names (until 2026-10-15) still count, so a Pi that had it
+# needs no new settings. Not its AP_CHANNEL: that was a 2.4 GHz dongle's.
+ap_ssid=${KISMET_AP_SSID:-${AP_SSID:-}}
+ap_psk=${KISMET_AP_PSK:-${AP_PASSPHRASE:-}}
+ap_channel=${KISMET_AP_CHANNEL:-149}
+ap_band=a
+(( ap_channel <= 14 )) && ap_band=bg
 
 install -m 755 "$SRC/kismet-ap-switch" /usr/local/sbin/kismet-ap-switch
 install -m 644 "$SRC/kismet-ap-switch.service" /etc/systemd/system/kismet-ap-switch.service
@@ -26,14 +33,14 @@ systemctl daemon-reload
 # phone on the road. Its address goes in own-radios.txt, which wigle-sync reads
 # to leave the AP out of uploads: it travels with the car.
 own_radios=$LOG_DIR/own-radios.txt
-if [[ -n ${KISMET_AP_SSID:-} ]]; then
-    (( ${#KISMET_AP_PSK} >= 8 && ${#KISMET_AP_PSK} <= 63 )) || { echo "KISMET_AP_PSK is 8 to 63 characters" >&2; exit 1; }
+if [[ -n $ap_ssid ]]; then
+    (( ${#ap_psk} >= 8 && ${#ap_psk} <= 63 )) || { echo "KISMET_AP_PSK is 8 to 63 characters" >&2; exit 1; }
     ap_settings=(connection.interface-name wlan_host connection.autoconnect no
-        802-11-wireless.mode ap 802-11-wireless.ssid "$KISMET_AP_SSID"
-        802-11-wireless.band a 802-11-wireless.channel "${KISMET_AP_CHANNEL:-149}"
+        802-11-wireless.mode ap 802-11-wireless.ssid "$ap_ssid"
+        802-11-wireless.band "$ap_band" 802-11-wireless.channel "$ap_channel"
         802-11-wireless.cloned-mac-address permanent
         wifi-sec.key-mgmt wpa-psk wifi-sec.proto rsn wifi-sec.pairwise ccmp wifi-sec.group ccmp
-        wifi-sec.psk "$KISMET_AP_PSK"
+        wifi-sec.psk "$ap_psk"
         ipv4.method shared ipv4.addresses "${KISMET_AP_ADDRESS:-192.168.50.1/24}" ipv6.method disabled)
     if nmcli -t connection show kismet-ap >/dev/null 2>&1; then
         nmcli connection modify kismet-ap "${ap_settings[@]}"
