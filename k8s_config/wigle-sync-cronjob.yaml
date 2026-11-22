@@ -77,6 +77,27 @@ spec:
                 # plain listener, inside the cluster. Unreachable is not a failure.
                 - name: KAFKA_BOOTSTRAP
                   value: "kafka-kafka-bootstrap.brick-kafka.svc.cluster.local:9092"
+                # Follows-me (#83, follows.py): home and the user's own devices are
+                # private, so they come from the Secret, both optional. Without
+                # FOLLOWS_HOME, home is where drives start.
+                - name: FOLLOWS_HOME
+                  valueFrom:
+                    secretKeyRef:
+                      name: wigle-sync-secrets
+                      key: FOLLOWS_HOME
+                      optional: true
+                - name: FOLLOWS_ALLOW
+                  valueFrom:
+                    secretKeyRef:
+                      name: wigle-sync-secrets
+                      key: FOLLOWS_ALLOW
+                      optional: true
+                - name: FOLLOWS_MIN_TRIPS
+                  value: "3"
+                - name: FOLLOWS_MIN_KM
+                  value: "2"
+                - name: FOLLOWS_HOME_KM
+                  value: "1"
                 # Downloads and tar.gz'ing happen here, not on the node's root disk
                 # (brick420's SD card is tight).
                 - name: TMPDIR

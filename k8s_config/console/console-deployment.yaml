@@ -60,6 +60,9 @@ spec:
               name: wigle-sync-secrets
               key: RADAR_CENTER
               optional: true
+        # The follows-me candidates the sync publishes (#83): wigle-sync.follows.
+        - name: KAFKA_BOOTSTRAP
+          value: "kafka-kafka-bootstrap.brick-kafka.svc.cluster.local:9092"
         - name: PROMETHEUS_URL
           value: "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090"
         - name: LOKI_URL

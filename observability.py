@@ -48,6 +48,10 @@ class RunStats:
     duration_seconds: float = 0.0
     # Surveillance and tracking devices on the drives synced this run, by kind (detect.py).
     detections: Counter = field(default_factory=Counter)
+    # Follows-me (#83, follows.py): devices published from this run's drives, and
+    # the candidates counted (None when there was no check this run). Counts only.
+    sightings: int = 0
+    follows_candidates: int | None = None
 
     @property
     def succeeded(self) -> bool:
@@ -157,6 +161,9 @@ def push_metrics(stats: RunStats, finished_at: float, recount: Callable[[], dict
     gauge("files_failed", "Files that failed to sync in the last run", stats.failed)
     gauge("files_deferred", "Files left on the Pi in the last run because WiGLE was unreachable", stats.deferred)
     gauge("bytes_uploaded", "Bytes (post-compression) uploaded to WiGLE in the last run", stats.bytes_uploaded)
+    gauge("sightings_published", "Followable devices published from the last run's drives", stats.sightings)
+    if stats.follows_candidates is not None:
+        gauge("follows_candidates", "Follows-me candidates at the last check", stats.follows_candidates)
     if stats.pi_online:
         gauge("last_pi_online_timestamp_seconds", "When the Pi was last reachable", finished_at)
         # The last run that actually synced with the Pi; runs while it's away don't replace these.

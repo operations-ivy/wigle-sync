@@ -20,6 +20,7 @@ from opentelemetry.trace import Status
 from opentelemetry.trace import StatusCode
 
 import detect
+import follows
 import ledger as ledgers
 import report
 from config import Settings
@@ -121,6 +122,42 @@ def drop_own_radios(path: Path, own: frozenset[str]) -> int:
     return dropped
 
 
+def publish_sightings(watch: follows.NullFollows, path: Path, key: str, stats: RunStats) -> None:
+    """A drive's followable devices onto the sightings topic (#83). Never holds
+    up the upload: a failure is logged and the drive is sent again next time
+    it's synced (or backfilled)."""
+    try:
+        found = follows.sightings(path.read_text(encoding="utf-8", errors="surrogateescape"), key)
+        watch.publish(found)
+    except Exception:
+        log.warning("Sightings not published", file=path.name, exc_info=True)
+        return
+    stats.sightings += len(found)
+
+
+def check_follows(pi: PiClient, watch: follows.NullFollows, own_radios: frozenset[str], stats: RunStats) -> None:
+    """The follows-me candidates from the whole history: onto wigle-sync.follows
+    for the console, and their addresses into follows.txt on the Pi for LED2.
+    Logs counts only (follows.py)."""
+    if not watch.available:
+        return
+    try:
+        rules = follows.Rules.from_env()
+        candidates = watch.history.candidates(rules, frozenset(m.upper() for m in own_radios))
+        watch.publish_candidates(candidates, rules)
+        pi.write_follows(c["mac"] for c in candidates)
+    except Exception:
+        log.warning("Follows-me check failed", exc_info=True)
+        return
+    stats.follows_candidates = len(candidates)
+    log.info(
+        "Follows-me check",
+        candidates=len(candidates),
+        devices=len(watch.history.devices),
+        sightings=len(watch.history),
+    )
+
+
 def pi_is_online(host: str, port: int, timeout: float) -> bool:
     try:
         with socket.create_connection((host, port), timeout=timeout):
@@ -137,8 +174,10 @@ def sync_file(
     stats: RunStats,
     ledger: ledgers.NullLedger | None = None,
     own_radios: frozenset[str] = frozenset(),
+    watch: follows.NullFollows | None = None,
 ) -> None:
     ledger = ledger or ledgers.NullLedger()
+    watch = watch or follows.NullFollows()
     with tracer.start_as_current_span("sync_file") as span, tempfile.TemporaryDirectory() as tmp:
         span.set_attribute("file.name", remote_file.name)
         span.set_attribute("file.size", remote_file.size)
@@ -214,6 +253,10 @@ def sync_file(
         if dropped:
             log.info("Left the Pi's own radios out of the upload", file=remote_file.name, rows=dropped)
 
+        if watch.available:
+            with tracer.start_as_current_span("follows.publish"):
+                publish_sightings(watch, local_path, key, stats)
+
         if settings.compress:
             with tracer.start_as_current_span("compress"):
                 upload_path = compress(local_path)
@@ -264,6 +307,7 @@ def run(settings: Settings, stats: RunStats, dry_run: bool = False) -> None:
         log.info("Pi went away while connecting, nothing to do", host=settings.pi_host, error=str(e))
         return
 
+    watch: follows.NullFollows = follows.NullFollows()
     with tracer.start_as_current_span("ledger.load"):
         ledger = ledgers.open_ledger(os.environ.get("KAFKA_BOOTSTRAP"), os.environ.get("LEDGER_TOPIC", ledgers.TOPIC))
     try:
@@ -272,13 +316,16 @@ def run(settings: Settings, stats: RunStats, dry_run: bool = False) -> None:
         stats.files_found = len(ready)
         log.info("Found files ready to upload", count=len(ready), files=[f.name for f in ready])
         own_radios = pi.own_radios() if ready else frozenset()
+        if ready and not dry_run:
+            with tracer.start_as_current_span("follows.load"):
+                watch = follows.open_follows(os.environ.get("KAFKA_BOOTSTRAP"))
 
         for i, remote_file in enumerate(ready):
             if dry_run:
                 log.info("Dry run, would upload", file=remote_file.name, size=remote_file.size)
                 continue
             try:
-                sync_file(pi, wigle, remote_file, settings, stats, ledger, own_radios)
+                sync_file(pi, wigle, remote_file, settings, stats, ledger, own_radios, watch)
             except WigleUnreachable as e:
                 # The home internet is down, not something wigle-sync got wrong. Every
                 # file is still on the Pi, so the next run picks them up; stop trying now.
@@ -290,9 +337,40 @@ def run(settings: Settings, stats: RunStats, dry_run: bool = False) -> None:
             except Exception:
                 stats.failed += 1
                 log.exception("Failed to sync file, leaving it on the Pi for next run", file=remote_file.name)
+        with tracer.start_as_current_span("follows.check"):
+            check_follows(pi, watch, own_radios, stats)
     finally:
+        watch.close()
         ledger.close()
         pi.close()
+
+
+def backfill_sightings(settings: Settings, stats: RunStats) -> int:
+    """Publish the sightings of every drive already archived on the Pi (the
+    history before #83), then run the follows-me check. Safe to repeat: a
+    drive's records replace themselves."""
+    watch = follows.open_follows(os.environ.get("KAFKA_BOOTSTRAP"))
+    if not watch.available:
+        log.error("Kafka unset or unreadable: nothing to backfill into")
+        return 1
+    pi = PiClient(settings)
+    try:
+        pi.connect()
+        stats.pi_online = True
+        archived = pi.list_archived(".wiglecsv")
+        log.info("Backfilling sightings", files=len(archived))
+        own_radios = pi.own_radios()
+        for remote_file in archived:
+            with tempfile.TemporaryDirectory() as tmp:
+                local_path = pi.download(remote_file, Path(tmp))
+                if has_observations(local_path) and not stationary(local_path):
+                    publish_sightings(watch, local_path, ledgers.file_key(local_path), stats)
+        check_follows(pi, watch, own_radios, stats)
+    finally:
+        watch.close()
+        pi.close()
+    log.info("Backfill complete", files=len(archived), sightings=stats.sightings)
+    return 0
 
 
 def wigle_totals(settings: Settings) -> dict[str, float]:
@@ -327,7 +405,7 @@ def seed_totals(settings: Settings, dry_run: bool = False) -> int:
 def span_attributes(stats: RunStats) -> dict:
     """The run's stats as span attributes: a span takes only plain values,
     so detections become one attribute per kind found."""
-    out = {f"sync.{k}": v for k, v in vars(stats).items() if k != "detections"}
+    out = {f"sync.{k}": v for k, v in vars(stats).items() if k != "detections" and v is not None}
     out.update({f"sync.detections.{k}": n for k, n in stats.detections.items()})
     return out
 
@@ -340,6 +418,11 @@ def main() -> int:
         "--seed-totals",
         action="store_true",
         help="recount the lifetime upload totals from WiGLE's upload history and push them (--dry-run: print only)",
+    )
+    parser.add_argument(
+        "--backfill-sightings",
+        action="store_true",
+        help="publish the follows-me sightings of every drive archived on the Pi, then check (#83)",
     )
     args = parser.parse_args()
 
@@ -354,6 +437,9 @@ def main() -> int:
 
     if args.seed_totals:
         return seed_totals(settings, dry_run=args.dry_run)
+
+    if args.backfill_sightings:
+        return backfill_sightings(settings, RunStats())
 
     if args.dry_run:
         os.environ.pop("PUSHGATEWAY_URL", None)  # a rehearsal isn't a run

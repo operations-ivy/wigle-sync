@@ -3,6 +3,7 @@ from __future__ import annotations
 import posixpath
 import stat
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,6 +26,7 @@ class RemoteFile:
 
 
 OWN_RADIOS = "own-radios.txt"  # in the log dir: MACs never uploaded (PiClient.own_radios)
+FOLLOWS = "follows.txt"  # in the log dir: follows-me candidates for LED2 (PiClient.write_follows)
 
 
 def _session(filename: str) -> str:
@@ -148,6 +150,28 @@ class PiClient:
             return frozenset()
         lines = (line.strip().lower() for line in text.splitlines())
         return frozenset(line for line in lines if line and not line.startswith("#"))
+
+    def list_archived(self, extension: str) -> list[RemoteFile]:
+        """The files already synced, in the archive dir, oldest first."""
+        try:
+            entries = self.sftp.listdir_attr(self.settings.pi_archive_dir)
+        except FileNotFoundError:
+            return []
+        files = [
+            RemoteFile(e.filename, posixpath.join(self.settings.pi_archive_dir, e.filename), e.st_size, e.st_mtime)
+            for e in entries
+            if e.filename.endswith(extension) and e.st_mode is not None and stat.S_ISREG(e.st_mode)
+        ]
+        return sorted(files, key=lambda f: f.mtime)
+
+    def write_follows(self, macs: Iterable[str]) -> None:
+        """The follows-me candidates' addresses, one per line, into follows.txt
+        in the log dir (status-leds.py lights LED2 for them). Written whole and
+        renamed into place, so LED2 never reads half a list."""
+        path = posixpath.join(self.settings.pi_remote_dir, FOLLOWS)
+        with self.sftp.open(f"{path}.new", "w") as f:
+            f.write("".join(f"{mac}\n" for mac in sorted(set(macs))))
+        self.sftp.posix_rename(f"{path}.new", path)
 
     def download(self, remote_file: RemoteFile, local_dir: Path) -> Path:
         local_path = local_dir / remote_file.name

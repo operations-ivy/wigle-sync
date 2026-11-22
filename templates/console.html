@@ -231,6 +231,11 @@ details.panel > summary:focus-visible{ outline:2px solid var(--cyan); outline-of
     <div id="aa-body"></div>
   </details>
 
+  <details class="panel" id="fm-panel">
+    <summary class="panel-head"><h2>FOLLOWS ME</h2><span class="meta" id="fm-meta"></span></summary>
+    <div id="fm-body"></div>
+  </details>
+
   <section class="panel">
     <div class="panel-head"><h2>WIGLE</h2><span class="meta" id="q-meta"></span></div>
     <div id="q-body"></div>
@@ -613,6 +618,27 @@ details.panel > summary:focus-visible{ outline:2px solid var(--cyan); outline-of
     });
   }
 
+  // Follows-me (#83): devices heard on several trips, in different places, away
+  // from home. Each one's trips, with where it was heard.
+  function renderFollows(d){
+    var f = d.follows;
+    if (!f) { $("fm-meta").textContent = "off"; $("fm-body").innerHTML = '<div class="empty">Not set up.</div>'; return; }
+    if (f.error) { $("fm-body").innerHTML = srcErr(f); $("fm-meta").textContent = ""; return; }
+    if (!f.at) { $("fm-meta").textContent = "no check yet"; $("fm-body").innerHTML = '<div class="empty">No follows-me check yet: the next sync with drives makes one.</div>'; return; }
+    var c = f.candidates;
+    $("fm-meta").textContent = (c.length ? plural(c.length, "candidate") : "clear") + " · checked " + ago(f.at);
+    var rules = '<div class="empty">' + num(f.devices) + ' devices on ' + num(f.sightings) + ' sightings · a candidate is heard on ' +
+      f.rules.min_trips + '+ trips, ' + f.rules.min_km + ' km+ apart, over ' + f.rules.home_km + ' km from home</div>';
+    if (!c.length) { $("fm-body").innerHTML = rules; return; }
+    $("fm-body").innerHTML = rules + aaTable(["Device", "Kind", "#Trips", "#Spread km", "Last heard", "Where"], c.map(function(x){
+      var where = x.seen.map(function(s){
+        return esc(stamp(s.start)) + " " + s.places.map(function(p){ return esc(p[0] + "," + p[1]); }).join(" → ");
+      }).join("<br>");
+      return '<tr><td>' + esc(x.mac) + (x.name ? '<br>' + esc(x.name) : "") + '</td><td>' + esc(x.kind) + '</td><td class="num">' +
+        num(x.trips) + '</td><td class="num">' + esc(x.spread_km) + '</td><td>' + esc(ago(x.last_seen)) + '</td><td>' + where + '</td></tr>';
+    }));
+  }
+
   // Open or shut, as the viewer left it last time.
   function remember(id, key){
     try { $(id).open = localStorage.getItem(key) === "1"; } catch (e) {}
@@ -622,11 +648,12 @@ details.panel > summary:focus-visible{ outline:2px solid var(--cyan); outline-of
   }
   remember("aa-panel", "aa-open");
   remember("lg-panel", "lg-open");
+  remember("fm-panel", "fm-open");
 
   /* ---------------- loop ---------------- */
   function render(){
     var d = state.data;
-    renderHud(d); renderWigle(d); renderFaults(d); renderAfterAction(d); renderLogs(d);
+    renderHud(d); renderWigle(d); renderFaults(d); renderAfterAction(d); renderFollows(d); renderLogs(d);
     if (RUN_STRIP) { $("rl-panel").hidden = false; renderRunLog(d); }
     tickCountdown();
   }

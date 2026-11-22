@@ -150,4 +150,4 @@ def test_silences_of_five_minutes_or_more_are_gaps():
 def test_names_lose_kismets_octal_escapes():
     r = build(row("aa:00:00:00:00:01", r"Sam\342\200\231s Phone", 0))
     assert r["top_networks"][0]["ssid"] == "Sam’s Phone"
-    assert report._name(r"caf\303") == "caf�"  # a cut-off character becomes one replacement mark
+    assert report.decode_name(r"caf\303") == "caf�"  # a cut-off character becomes one replacement mark
