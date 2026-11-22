@@ -193,6 +193,14 @@ def test_no_own_radios_leaves_the_file_alone(tmp_path):
     csv = tmp_path / "Kismet-1.wiglecsv"
     csv.write_text("WigleWifi-1.4\nMAC,SSID\naa:bb:cc:dd:ee:ff,x\n")
     assert drop_own_radios(csv, frozenset()) == 0
+    assert csv.read_text() == "WigleWifi-1.4\nMAC,SSID\naa:bb:cc:dd:ee:ff,x\n"
+
+
+def test_an_ssid_that_isnt_utf8_survives_the_rewrite(tmp_path):
+    csv = tmp_path / "Kismet-1.wiglecsv"
+    csv.write_bytes(b"WigleWifi-1.4\nMAC,SSID\nb8:27:eb:00:00:01,car\naa:bb:cc:dd:ee:ff,caf\xe9\n")
+    assert drop_own_radios(csv, frozenset({"b8:27:eb:00:00:01"})) == 1
+    assert csv.read_bytes() == b"WigleWifi-1.4\nMAC,SSID\naa:bb:cc:dd:ee:ff,caf\xe9\n"
 
 
 def test_sync_file_uploads_without_the_own_radios(tmp_path):
@@ -201,7 +209,12 @@ def test_sync_file_uploads_without_the_own_radios(tmp_path):
     pi, wigle, stats = mock.Mock(), mock.Mock(), RunStats()
     pi.download.return_value = csv
     uploaded = []
-    wigle.upload.side_effect = lambda path: uploaded.append(path.read_text()) or {"results": []}
+
+    def fake_upload(path):
+        uploaded.append(path.read_text())
+        return {"results": []}
+
+    wigle.upload.side_effect = fake_upload
     remote = RemoteFile(csv.name, f"/r/{csv.name}", csv.stat().st_size, 0)
     sync_file(pi, wigle, remote, _settings(), stats, own_radios=frozenset({"b8:27:eb:00:00:01"}))
     assert uploaded == ["WigleWifi-1.4\nMAC,SSID\naa:bb:cc:dd:ee:ff,x\n"]

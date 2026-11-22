@@ -111,11 +111,13 @@ def drop_own_radios(path: Path, own: frozenset[str]) -> int:
     rows went. `own` holds lower-case MACs."""
     if not own or path.suffix != ".wiglecsv":
         return 0
-    lines = path.read_text(errors="replace").splitlines(keepends=True)
-    keep = lines[:2] + [line for line in lines[2:] if line.split(",", 1)[0].strip().lower() not in own]
-    dropped = len(lines) - len(keep)
+    # surrogateescape both ways: an SSID that isn't UTF-8 is uploaded byte for byte.
+    lines = path.read_text(encoding="utf-8", errors="surrogateescape").splitlines(keepends=True)
+    header, rows = lines[:2], lines[2:]
+    keep = [row for row in rows if row.split(",", 1)[0].strip().lower() not in own]
+    dropped = len(rows) - len(keep)
     if dropped:
-        path.write_text("".join(keep))
+        path.write_text("".join(header + keep), encoding="utf-8", errors="surrogateescape")
     return dropped
 
 

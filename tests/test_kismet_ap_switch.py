@@ -71,7 +71,14 @@ def test_settings_are_read_like_the_shell_does(tmp_path):
 
 
 @pytest.fixture
-def kismet(tmp_path):
+def login(tmp_path):
+    path = tmp_path / "kismet-httpd"
+    path.write_text("httpd_username=wigle\nhttpd_password=secret\n")
+    return path
+
+
+@pytest.fixture
+def kismet(login):
     seen = {}
 
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -80,11 +87,13 @@ def kismet(tmp_path):
             seen["path"] = self.path
             body = urllib.parse.parse_qs(self.rfile.read(int(self.headers["Content-Length"])).decode())
             seen["fields"] = json.loads(body["json"][0])["fields"]
-            out = json.dumps([
-                {"kismet.device.base.commonname": "home net", "signal": -61},
-                {"kismet.device.base.commonname": "home net", "signal": -44},
-                {"kismet.device.base.commonname": "neighbour", "signal": -30},
-            ]).encode()
+            out = json.dumps(
+                [
+                    {"kismet.device.base.commonname": "home net", "signal": -61},
+                    {"kismet.device.base.commonname": "home net", "signal": -44},
+                    {"kismet.device.base.commonname": "neighbour", "signal": -30},
+                ]
+            ).encode()
             self.send_response(200)
             self.send_header("Content-Length", str(len(out)))
             self.end_headers()
@@ -95,8 +104,6 @@ def kismet(tmp_path):
 
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    login = tmp_path / "kismet-httpd"
-    login.write_text("httpd_username=wigle\nhttpd_password=secret\n")
     yield f"http://127.0.0.1:{server.server_port}", login, seen
     server.shutdown()
 
@@ -108,9 +115,7 @@ def test_kismet_hears_gives_the_strongest_home_signal(kismet):
     assert seen["auth"] == "Basic d2lnbGU6c2VjcmV0"
 
 
-def test_kismet_not_running_is_kismet_down(tmp_path):
-    login = tmp_path / "kismet-httpd"
-    login.write_text("httpd_username=wigle\nhttpd_password=secret\n")
+def test_kismet_not_running_is_kismet_down(login):
     with pytest.raises(ap.KismetDown):
         ap.kismet_hears("home net", login, "http://127.0.0.1:9")
 
@@ -134,3 +139,24 @@ def test_kismet_answering_again_resets_the_silence():
         s.step(20 * i, home=False, ap_up=True, home_signal=None, kismet_up=False)
     s.step(500, home=False, ap_up=True, home_signal=None, kismet_up=True)
     assert s.step(520, home=False, ap_up=True, home_signal=None, kismet_up=False) is None
+
+
+def test_an_error_object_from_kismet_is_kismet_down(login):
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            out = b'{"error": "busy"}'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with pytest.raises(ap.KismetDown):
+            ap.kismet_hears("home net", login, f"http://127.0.0.1:{server.server_port}")
+    finally:
+        server.shutdown()
