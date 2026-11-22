@@ -6,8 +6,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-import paramiko
 import brick_observe
+import paramiko
 
 from config import Settings
 
@@ -22,6 +22,9 @@ class RemoteFile:
     mtime: int
     # SQLite rollback journal left beside a .kismet when Kismet stopped mid-write.
     journal_name: str | None = None
+
+
+OWN_RADIOS = "own-radios.txt"  # in the log dir: MACs never uploaded (PiClient.own_radios)
 
 
 def _session(filename: str) -> str:
@@ -134,6 +137,17 @@ class PiClient:
             self.settings.min_file_age_seconds,
             now=self.remote_now(),
         )
+
+    def own_radios(self) -> frozenset[str]:
+        """The Pi's own radios' MACs, lower case, from own-radios.txt in its log
+        dir (written by pi/ap/setup-ap.sh: the phone AP's address). No file: empty."""
+        try:
+            with self.sftp.open(posixpath.join(self.settings.pi_remote_dir, OWN_RADIOS)) as f:
+                text = f.read().decode(errors="replace")
+        except FileNotFoundError:
+            return frozenset()
+        lines = (line.strip().lower() for line in text.splitlines())
+        return frozenset(line for line in lines if line and not line.startswith("#"))
 
     def download(self, remote_file: RemoteFile, local_dir: Path) -> Path:
         local_path = local_dir / remote_file.name

@@ -1,0 +1,177 @@
+#!/usr/bin/python3
+"""Kismet's phone AP on the onboard radio (wlan_host), away from home only.
+
+wlan_host is the home Wi-Fi link at home. Off it for LEFT_AFTER seconds
+(left home, or booted away), it becomes the phone AP (NetworkManager's
+`kismet-ap` profile), so Kismet's web UI is at http://<AP address>:2501 on the
+road. In AP mode it can't look for home, so coming home is told by Kismet:
+when its capture radios hear the home network at HOME_SIGNAL dBm or stronger
+on HITS checks in a row, the AP goes down and NetworkManager rejoins home. If
+home doesn't come up within REJOIN seconds, the AP comes back and home isn't
+tried again for COOLDOWN seconds. Kismet not answering for UNANSWERED checks
+counts as maybe home too (it can't tell, and an AP stuck at home cuts the Pi
+off), with the same fallback.
+
+Settings: /etc/default/kismet-pi (HOME_WIFI_SSID; KISMET_AP_SSID turns it on).
+Kismet's login: the kismet-httpd credential (LoadCredential, kismet-ap-switch.service).
+Standard library only, like the Pi's other scripts.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.parse
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+
+PROFILE = "kismet-ap"
+SETTINGS = Path("/etc/default/kismet-pi")
+HTTPD_CONF = Path(os.environ.get("CREDENTIALS_DIRECTORY", "/nonexistent")) / "kismet-httpd"
+KISMET = "http://127.0.0.1:2501"
+CHECK_EVERY = 20  # seconds
+LEFT_AFTER = 120  # off home Wi-Fi this long: away (kismet-left-home's grace too)
+HOME_SIGNAL = -70  # dBm: home heard this strongly means in the driveway, not passing by
+HITS = 2
+REJOIN = 90
+COOLDOWN = 600
+SEEN_WITHIN = 60  # seconds: Kismet's last-time view
+UNANSWERED = 9  # checks (3 minutes) with no answer from Kismet: try home anyway
+
+
+def read_settings(path: Path) -> dict[str, str]:
+    """KEY=value lines of a shell settings file (quotes stripped)."""
+    out = {}
+    for line in path.read_text().splitlines():
+        key, sep, value = line.strip().partition("=")
+        if sep and key.isidentifier():  # a comment's "key" isn't an identifier
+            out[key] = value.strip().strip("\"'")
+    return out
+
+
+def on_home_wifi() -> bool:
+    return subprocess.run(["/usr/local/sbin/on-home-wifi"], check=False).returncode == 0
+
+
+def ap_active() -> bool:
+    out = subprocess.run(
+        ["nmcli", "-g", "GENERAL.STATE", "connection", "show", PROFILE], capture_output=True, text=True, check=False
+    ).stdout
+    return "activated" in out
+
+
+def ap(up: bool) -> None:
+    subprocess.run(["nmcli", "connection", "up" if up else "down", PROFILE], check=False)
+
+
+class KismetDown(Exception):
+    """Kismet didn't answer (not running, no login, or a bad reply)."""
+
+
+def kismet_hears(ssid: str, httpd_conf: Path = HTTPD_CONF, base: str = KISMET) -> int | None:
+    """The strongest signal (dBm) Kismet heard ssid at in the last SEEN_WITHIN
+    seconds, or None if it didn't hear it. KismetDown if Kismet didn't answer."""
+    try:
+        login = read_settings(httpd_conf)
+        auth = base64.b64encode(f"{login['httpd_username']}:{login['httpd_password']}".encode()).decode()
+        fields = {
+            "fields": [
+                "kismet.device.base.commonname",
+                ["kismet.device.base.signal/kismet.common.signal.last_signal", "signal"],
+            ]
+        }
+        req = urllib.request.Request(
+            f"{base}/devices/views/phydot11_accesspoints/last-time/-{SEEN_WITHIN}/devices.json",
+            data=urllib.parse.urlencode({"json": json.dumps(fields)}).encode(),
+            headers={"Authorization": f"Basic {auth}"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            aps = json.load(r)
+        signals = [a["signal"] for a in aps if a.get("kismet.device.base.commonname") == ssid and a.get("signal")]
+    except (OSError, KeyError, ValueError, TypeError, AttributeError) as e:  # not the list Kismet sends
+        raise KismetDown(str(e)) from e
+    return max(signals, default=None)
+
+
+@dataclass
+class Switch:
+    """The decision, one check at a time; the world is passed in so tests can fake it."""
+
+    off_since: float | None = None
+    hits: int = 0
+    unanswered: int = 0
+    cooldown_until: float = 0.0
+
+    def step(self, now: float, home: bool, ap_up: bool, home_signal: int | None, kismet_up: bool = True) -> str | None:
+        """What to do now: "up" (start the AP), "down" (stop it, try home) or None.
+        home_signal is what Kismet heard home at (None: not heard), and
+        kismet_up whether it answered at all."""
+        if home:
+            self.off_since, self.hits, self.unanswered = None, 0, 0
+            return None
+        if not ap_up:
+            self.hits = self.unanswered = 0
+            if self.off_since is None:
+                self.off_since = now
+            return "up" if now - self.off_since >= LEFT_AFTER else None
+        self.unanswered = 0 if kismet_up else self.unanswered + 1
+        heard = kismet_up and home_signal is not None and home_signal >= HOME_SIGNAL
+        self.hits = self.hits + 1 if heard else 0
+        if (self.hits >= HITS or self.unanswered >= UNANSWERED) and now >= self.cooldown_until:
+            self.hits = self.unanswered = 0
+            return "down"
+        return None
+
+    def rejoin_failed(self, now: float) -> None:
+        """Home didn't come back after "down": the AP returns now, home waits."""
+        self.cooldown_until = now + COOLDOWN
+        self.off_since = now - LEFT_AFTER
+
+
+def wait_for_home(timeout: float) -> bool:
+    """Whether home Wi-Fi comes up within timeout seconds."""
+    deadline = time.monotonic() + timeout
+    while not on_home_wifi():
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(5)
+    return True
+
+
+def main() -> int:
+    ssid = read_settings(SETTINGS).get("HOME_WIFI_SSID", "")
+    if not ssid:
+        print("HOME_WIFI_SSID is empty", file=sys.stderr)
+        return 1
+    switch = Switch()
+    while True:
+        now = time.monotonic()
+        up = ap_active()
+        signal, kismet_up = None, True
+        if up:
+            try:
+                signal = kismet_hears(ssid)
+            except KismetDown:
+                kismet_up = False
+        action = switch.step(now, on_home_wifi(), up, signal, kismet_up)
+        if action == "up":
+            print("off home Wi-Fi: starting the phone AP")
+            ap(True)
+        elif action == "down":
+            print("Kismet hears home (or isn't answering): stopping the phone AP to try home")
+            ap(False)
+            if not wait_for_home(REJOIN):
+                print(f"home didn't come back; the AP returns, home is tried again in {COOLDOWN} s")
+                switch.rejoin_failed(time.monotonic())
+                continue
+            print("back on home Wi-Fi")
+        time.sleep(CHECK_EVERY)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

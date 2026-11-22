@@ -77,6 +77,24 @@ if ! cmp -s "$SRC/kismet/$wifi_sources" /etc/kismet/kismet_wifi.conf; then
     install -m 644 "$SRC/kismet/$wifi_sources" /etc/kismet/kismet_wifi.conf
     echo "installed /etc/kismet/kismet_wifi.conf ($wifi_sources); restart Kismet or reboot to use it"
 fi
+# This Pi's own wlan_mon1 (WIFI_MON1_USB): a .link that sorts before the shared
+# ones, since the first matching .link wins. brick69's T2U Nano would otherwise
+# match 10-wlan_mon0-rtl8811au.link beside its RTL8821CU.
+local_link=/etc/systemd/network/05-wlan_mon1-local.link
+if [[ -n ${WIFI_MON1_USB:-} ]]; then
+    [[ $WIFI_MON1_USB =~ ^[0-9a-f]{4}:[0-9a-f]{4}$ ]] || { echo "WIFI_MON1_USB is vendor:product, like 2357:011e" >&2; exit 1; }
+    want=$(printf '%s\n' "# This Pi's 2.4 GHz capture radio (WIFI_MON1_USB in $SETTINGS, pi/bootstrap.sh)." \
+        "[Match]" "Property=ID_VENDOR_ID=${WIFI_MON1_USB%%:*} ID_MODEL_ID=${WIFI_MON1_USB##*:}" "" "[Link]" "Name=wlan_mon1")
+    if [[ ! -f $local_link || $(<"$local_link") != "$want" ]]; then
+        printf '%s\n' "$want" > "$local_link"
+        echo "installed $local_link ($WIFI_MON1_USB is wlan_mon1)"
+        changed_links=1
+    fi
+elif [[ -f $local_link ]]; then
+    rm -f "$local_link"
+    echo "removed $local_link"
+    changed_links=1
+fi
 # journald reads its drop-ins only when it starts; flush moves what's in RAM to disk.
 if (( changed_journald )); then
     systemctl restart systemd-journald.service
@@ -113,13 +131,15 @@ fi
 
 install -d -m 2770 -o "$KISMET_USER" -g kismet "$LOG_DIR"
 
-# Bluetooth is hci0. On brick69 the onboard Bluetooth is off (it shares a chip
-# and antenna with wlan_host), so the USB dongle is always hci0. The zero2w
-# handheld has no dongle: its onboard Bluetooth is hci0 (the user, 2026-11-17),
-# and a disable-bt from an earlier run comes out. Takes effect at the next boot.
+# Bluetooth is hci0: the onboard chip (BT_ONBOARD=1; by default on the zero2w
+# handheld, the user, 2026-11-17, and on brick69 since 2026-11-21) or a USB
+# dongle, with the onboard one turned off so the dongle is always hci0. The
+# onboard chip shares its antenna with wlan_host. Takes effect at the next boot.
+bt_onboard=${BT_ONBOARD:-}
+[[ -n $bt_onboard ]] || { [[ $PROFILE == zero2w ]] && bt_onboard=1 || bt_onboard=0; }
 bt_reboot=0
 config=/boot/firmware/config.txt
-if [[ $PROFILE == zero2w ]]; then
+if (( bt_onboard )); then
     if [[ -f $config ]] && grep -qx "dtoverlay=disable-bt" "$config"; then
         sed -i -e '/^# wigle-sync: onboard Bluetooth off; a USB dongle is hci0 (pi\/bootstrap.sh)$/d' \
             -e '/^dtoverlay=disable-bt$/d' "$config"
@@ -153,6 +173,8 @@ bash "$SRC/setup-kismet-size-watch.sh"
 # status-leds load it with LoadCredential, and a unit whose credential file is
 # missing fails to start, which stopped a first run on a fresh card (#65).
 bash "$SRC/setup-kismet-login.sh"
+# The phone AP (KISMET_AP_SSID), or its removal: after the login, which its unit loads.
+bash "$SRC/ap/setup-ap.sh"
 bash "$SRC/metrics/setup-metrics.sh"
 if [[ $PROFILE == zero2w ]]; then
     bash "$SRC/zero2w/setup-zero2w.sh"
@@ -181,9 +203,14 @@ if [[ ${WIFI_SPLIT:-0} == 1 ]]; then
     check "wlan_mon1 supports monitor mode" phy_supports wlan_mon1 monitor
     check "Kismet captures from wlan_mon1" grep -q "^source=wlan_mon1" /etc/kismet/kismet_wifi.conf
 fi
+if [[ -n ${KISMET_AP_SSID:-${AP_SSID:-}} ]]; then  # AP_SSID: the old AP's name (pi/ap/setup-ap.sh)
+    check "the phone AP profile exists (kismet-ap)" nmcli -t connection show kismet-ap
+    check "kismet-ap-switch running" systemctl is-active kismet-ap-switch.service
+    check "wlan_host can be an AP" phy_supports wlan_host AP
+fi
 check "kismet_site.conf captures from hci0" grep -q "^source=hci0" /etc/kismet/kismet_site.conf
 check "hci0 exists" test -e /sys/class/bluetooth/hci0
-if [[ $PROFILE == zero2w ]]; then
+if (( bt_onboard )); then
     check "hci0 is the onboard Bluetooth" sh -c 'grep -qx "DRIVER=hci_uart_bcm" /sys/class/bluetooth/hci0/device/uevent'
 else
     # The dongle, not the onboard chip (hci_uart_bcm): needs disable-bt and a reboot.

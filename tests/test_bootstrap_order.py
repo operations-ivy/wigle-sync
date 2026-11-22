@@ -14,6 +14,7 @@ LOGIN_LOADERS = {
     "metrics": "metrics/setup-metrics.sh",
     "eink": "eink/setup-eink.sh",
     "leds": "leds/setup-leds.sh",
+    "ap": "ap/setup-ap.sh",
 }
 
 

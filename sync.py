@@ -105,6 +105,22 @@ def stationary(path: Path) -> bool:
     )
 
 
+def drop_own_radios(path: Path, own: frozenset[str]) -> int:
+    """Remove the Pi's own radios from a .wiglecsv in place (its phone AP, which
+    travels with it: not a network to put on WiGLE's map). Returns how many
+    rows went. `own` holds lower-case MACs."""
+    if not own or path.suffix != ".wiglecsv":
+        return 0
+    # surrogateescape both ways: an SSID that isn't UTF-8 is uploaded byte for byte.
+    lines = path.read_text(encoding="utf-8", errors="surrogateescape").splitlines(keepends=True)
+    header, rows = lines[:2], lines[2:]
+    keep = [row for row in rows if row.split(",", 1)[0].strip().lower() not in own]
+    dropped = len(rows) - len(keep)
+    if dropped:
+        path.write_text("".join(header + keep), encoding="utf-8", errors="surrogateescape")
+    return dropped
+
+
 def pi_is_online(host: str, port: int, timeout: float) -> bool:
     try:
         with socket.create_connection((host, port), timeout=timeout):
@@ -120,6 +136,7 @@ def sync_file(
     settings: Settings,
     stats: RunStats,
     ledger: ledgers.NullLedger | None = None,
+    own_radios: frozenset[str] = frozenset(),
 ) -> None:
     ledger = ledger or ledgers.NullLedger()
     with tracer.start_as_current_span("sync_file") as span, tempfile.TemporaryDirectory() as tmp:
@@ -193,6 +210,10 @@ def sync_file(
                 if after_action:
                     log.info(REPORT_EVENT, file=remote_file.name, report=after_action)
 
+        dropped = drop_own_radios(local_path, own_radios)
+        if dropped:
+            log.info("Left the Pi's own radios out of the upload", file=remote_file.name, rows=dropped)
+
         if settings.compress:
             with tracer.start_as_current_span("compress"):
                 upload_path = compress(local_path)
@@ -250,13 +271,14 @@ def run(settings: Settings, stats: RunStats, dry_run: bool = False) -> None:
             ready = pi.list_ready_files()
         stats.files_found = len(ready)
         log.info("Found files ready to upload", count=len(ready), files=[f.name for f in ready])
+        own_radios = pi.own_radios() if ready else frozenset()
 
         for i, remote_file in enumerate(ready):
             if dry_run:
                 log.info("Dry run, would upload", file=remote_file.name, size=remote_file.size)
                 continue
             try:
-                sync_file(pi, wigle, remote_file, settings, stats, ledger)
+                sync_file(pi, wigle, remote_file, settings, stats, ledger, own_radios)
             except WigleUnreachable as e:
                 # The home internet is down, not something wigle-sync got wrong. Every
                 # file is still on the Pi, so the next run picks them up; stop trying now.
