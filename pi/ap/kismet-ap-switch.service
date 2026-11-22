@@ -1,0 +1,14 @@
+[Unit]
+Description=Kismet's phone AP on wlan_host when away from home (kismet-ap-switch)
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/kismet-ap-switch
+LoadCredential=kismet-httpd:/home/zaphod/.kismet/kismet_httpd.conf
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

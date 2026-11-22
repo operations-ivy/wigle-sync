@@ -24,6 +24,8 @@ class RemoteFile:
     journal_name: str | None = None
 
 
+OWN_RADIOS = "own-radios.txt"  # in the log dir: MACs never uploaded (PiClient.own_radios)
+
 def _session(filename: str) -> str:
     # "Kismet-20260924-15-25-36-1.kismet-journal" -> "Kismet-20260924-15-25-36-1"
     return filename.split(".", 1)[0]
@@ -134,6 +136,16 @@ class PiClient:
             self.settings.min_file_age_seconds,
             now=self.remote_now(),
         )
+
+    def own_radios(self) -> frozenset[str]:
+        """The Pi's own radios' MACs, lower case, from own-radios.txt in its log
+        dir (written by bootstrap.sh: the phone AP's address). None listed: empty."""
+        try:
+            with self.sftp.open(posixpath.join(self.settings.pi_remote_dir, OWN_RADIOS)) as f:
+                text = f.read().decode(errors="replace")
+        except FileNotFoundError:
+            return frozenset()
+        return frozenset(line.strip().lower() for line in text.splitlines() if line.strip() and not line.startswith("#"))
 
     def download(self, remote_file: RemoteFile, local_dir: Path) -> Path:
         local_path = local_dir / remote_file.name

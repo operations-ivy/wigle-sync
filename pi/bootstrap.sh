@@ -173,6 +173,8 @@ bash "$SRC/setup-kismet-size-watch.sh"
 # status-leds load it with LoadCredential, and a unit whose credential file is
 # missing fails to start, which stopped a first run on a fresh card (#65).
 bash "$SRC/setup-kismet-login.sh"
+# The phone AP (KISMET_AP_SSID), or its removal: after the login, which its unit loads.
+bash "$SRC/ap/setup-ap.sh"
 bash "$SRC/metrics/setup-metrics.sh"
 if [[ $PROFILE == zero2w ]]; then
     bash "$SRC/zero2w/setup-zero2w.sh"
@@ -200,6 +202,11 @@ if [[ ${WIFI_SPLIT:-0} == 1 ]]; then
     check "wlan_mon1 exists (the 2.4 GHz radio)" ip link show wlan_mon1
     check "wlan_mon1 supports monitor mode" phy_supports wlan_mon1 monitor
     check "Kismet captures from wlan_mon1" grep -q "^source=wlan_mon1" /etc/kismet/kismet_wifi.conf
+fi
+if [[ -n ${KISMET_AP_SSID:-} ]]; then
+    check "the phone AP profile exists (kismet-ap)" nmcli -t connection show kismet-ap
+    check "kismet-ap-switch running" systemctl is-active kismet-ap-switch.service
+    check "wlan_host can be an AP" phy_supports wlan_host AP
 fi
 check "kismet_site.conf captures from hci0" grep -q "^source=hci0" /etc/kismet/kismet_site.conf
 check "hci0 exists" test -e /sys/class/bluetooth/hci0

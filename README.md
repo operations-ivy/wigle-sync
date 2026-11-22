@@ -140,11 +140,31 @@ set by the setup script to a random password, kept only on the Pi in
 `~/.kismet/kismet_httpd.conf` (user `wigle`); before that, whoever reached
 port 2501 first could choose it.
 
-There's no phone AP any more (it was an RTL8188EUS running hostapd, retired
-2026-10-15 for the dongle's USB slot), so Kismet's UI isn't reachable on the
-road; at home it's on the home Wi-Fi at port 2501. `bootstrap.sh` removes what
-the AP left behind on a Pi that had it (its units and config, hostapd, and the
-patched `realtek-rtl8188eus` DKMS driver).
+### The phone AP
+
+Away from home, the onboard radio (`wlan_host`) becomes a phone AP, so Kismet's
+web UI is on the phone at `http://192.168.50.1:2501` (the user, 2026-11-21; it
+was an RTL8188EUS running hostapd until 2026-10-15). `KISMET_AP_SSID` and
+`KISMET_AP_PSK` in `/etc/default/kismet-pi` turn it on; `pi/ap/setup-ap.sh`
+(run by `bootstrap.sh`) makes NetworkManager's `kismet-ap` profile (WPA2, 5 GHz
+channel 149 by default, DHCP for the phone) and starts `kismet-ap-switch`:
+
+- **Leaving:** off home Wi-Fi for 2 minutes (left home, or booted away), the
+  AP comes up. Kismet keeps running as before (`kismet-left-home`).
+- **Coming home:** an AP can't look for home Wi-Fi, so Kismet's capture radios
+  do: home heard at -70 dBm or stronger on two checks 20 s apart takes the AP
+  down, and NetworkManager rejoins home (then Kismet stops 15 minutes later,
+  as ever). If home isn't back within 90 s, the AP returns and home isn't
+  tried again for 10 minutes. Kismet not answering for 3 minutes (stopped, say)
+  counts as maybe home too, so the AP never strands the Pi at home.
+- **Not on WiGLE:** the AP travels with the car, so its address is written to
+  `own-radios.txt` in the log dir, and wigle-sync leaves those rows out of
+  every upload.
+
+At home Kismet's UI is on the home Wi-Fi at port 2501. Emptying
+`KISMET_AP_SSID` removes the profile, the switch and `own-radios.txt`.
+`bootstrap.sh` still removes what the old AP left on a Pi that had it (its
+units and config, hostapd, and the patched `realtek-rtl8188eus` DKMS driver).
 
 GPS is a u-blox 7 on USB, read through gpsd. Once home wifi has been up for 15
 minutes, a NetworkManager dispatcher script stops Kismet, and deletes the session

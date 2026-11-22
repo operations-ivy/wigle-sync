@@ -8,6 +8,7 @@ from unittest import mock
 from config import Settings
 from observability import RunStats
 from pi_client import RemoteFile
+from sync import drop_own_radios
 from sync import has_observations
 from sync import pi_is_online
 from sync import recover_kismet_db
@@ -179,3 +180,28 @@ def test_stationary_sessions_are_archived_without_upload(tmp_path):
     wigle.upload.assert_not_called()
     pi.archive.assert_called_once_with(remote)
     assert (stats.archived_stationary, stats.uploaded) == (1, 0)
+
+
+def test_the_pis_own_radios_are_left_out_of_the_upload(tmp_path):
+    csv = tmp_path / "Kismet-1.wiglecsv"
+    csv.write_text("WigleWifi-1.4\nMAC,SSID\nB8:27:EB:00:00:01,car\naa:bb:cc:dd:ee:ff,x\n")
+    assert drop_own_radios(csv, frozenset({"b8:27:eb:00:00:01"})) == 1
+    assert csv.read_text() == "WigleWifi-1.4\nMAC,SSID\naa:bb:cc:dd:ee:ff,x\n"
+
+
+def test_no_own_radios_leaves_the_file_alone(tmp_path):
+    csv = tmp_path / "Kismet-1.wiglecsv"
+    csv.write_text("WigleWifi-1.4\nMAC,SSID\naa:bb:cc:dd:ee:ff,x\n")
+    assert drop_own_radios(csv, frozenset()) == 0
+
+
+def test_sync_file_uploads_without_the_own_radios(tmp_path):
+    csv = tmp_path / "Kismet-1.wiglecsv"
+    csv.write_text("WigleWifi-1.4\nMAC,SSID\nb8:27:eb:00:00:01,car\naa:bb:cc:dd:ee:ff,x\n")
+    pi, wigle, stats = mock.Mock(), mock.Mock(), RunStats()
+    pi.download.return_value = csv
+    uploaded = []
+    wigle.upload.side_effect = lambda path: uploaded.append(path.read_text()) or {"results": []}
+    remote = RemoteFile(csv.name, f"/r/{csv.name}", csv.stat().st_size, 0)
+    sync_file(pi, wigle, remote, _settings(), stats, own_radios=frozenset({"b8:27:eb:00:00:01"}))
+    assert uploaded == ["WigleWifi-1.4\nMAC,SSID\naa:bb:cc:dd:ee:ff,x\n"]
