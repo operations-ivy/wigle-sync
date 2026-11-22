@@ -44,6 +44,42 @@ def test_near_misses():
     assert detect.kind_of("aa:bb:cc:00:00:08", "Flock-ABCD", "BLE") is None
 
 
+def test_flock_signatures():
+    """The signatures flock-you and O'Horo's write-up agree on (wigle-sync#85)."""
+    assert detect.kind_of("b4:1e:52:12:34:56", "", "WIFI") == "flock"  # Flock's own OUI
+    assert detect.kind_of("B4:1E:52:12:34:56", "", "BLE") == "flock"
+    assert detect.kind_of("aa:bb:cc:12:34:56", "Flock Camera net 7", "WIFI") == "flock"
+    assert detect.kind_of("C1:22:33:44:55:66", "FS Ext Battery", "BLE") == "flock"
+    assert detect.kind_of("C1:22:33:44:55:66", "Penguin-1234567890", "BT") == "flock"
+    assert detect.kind_of("C1:22:33:44:55:66", "1234567890", "BLE", company="09C8") == "flock"
+    assert detect.kind_of("C1:22:33:44:55:66", "", "BLE", services=["E8CCBB38-9532-46A8-9FE5-1814DF172E6F"]) == "flock"
+
+
+def test_raven_and_shotspotter():
+    assert detect.kind_of("D1:22:33:44:55:66", "", "BLE", services=["3100", "3500"]) == "raven"
+    assert detect.kind_of("D1:22:33:44:55:66", "", "BLE", services=["3100"]) is None  # one 16-bit UUID can be anyone's
+    assert detect.kind_of("D4:11:D6:12:34:56", "", "WIFI") == "shotspotter"
+    assert detect.alerting(Counter({"raven": 1, "shotspotter": 1})) == Counter({"raven": 1, "shotspotter": 1})
+
+
+def test_what_ordinary_devices_look_like_does_not_match():
+    """Each of these is a kind of device seen on our own drives."""
+    for mac, name, kind in [
+        ("AA:BB:CC:00:00:01", "64WB-Flock", "WIFI"),  # a substring
+        ("AA:BB:CC:00:00:02", "PenguinGuest", "WIFI"),  # a home network
+        ("C1:22:33:44:55:66", "1234567890", "BLE"),  # 10 digits, without Flock's company ID
+        ("C1:22:33:44:55:66", "Penguin-12345", "BLE"),  # too short a serial
+        ("74:4C:A1:00:00:03", "", "WIFI"),  # a Liteon OUI, as in Flock's radios and many laptops
+        ("C1:22:33:44:55:67", "Raven 2RVP012345678", "BLE"),  # unconfirmed: no services to go on
+    ]:
+        assert detect.kind_of(mac, name, kind) is None, name
+
+
+def test_the_led_kinds_are_kinds():
+    assert detect.LED2_KINDS <= set(detect.KINDS)
+    assert "flipper" not in detect.LED2_KINDS
+
+
 def test_header_only_and_other_files(tmp_path):
     assert detect.scan_text(HEADER) == Counter()
     kismet = tmp_path / "Kismet-1.kismet"

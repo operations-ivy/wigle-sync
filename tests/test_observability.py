@@ -130,7 +130,14 @@ def test_detections_pushed_for_every_kind_when_the_pi_was_home():
     from collections import Counter
 
     home = _labelled(RunStats(pi_online=True, detections=Counter({"flock": 2, "skimmer": 1})))
-    assert home == {("flock", "medium"): 2, ("axon", "high"): 0, ("flipper", "high"): 0, ("skimmer", "low"): 1}
+    assert home == {
+        ("flock", "high"): 2,
+        ("raven", "medium"): 0,
+        ("shotspotter", "high"): 0,
+        ("axon", "high"): 0,
+        ("flipper", "high"): 0,
+        ("skimmer", "low"): 1,
+    }
     assert _labelled(RunStats(pi_online=False)) == {}  # away: the last drive's counts stay as they were
 
 
