@@ -388,7 +388,8 @@ def backfill_pi(settings: Settings, watch: follows.NullFollows, stats: RunStats)
     pi = PiClient(settings)
     try:
         pi.connect()
-        stats.pi_online = stats.pis[settings.pi_host] = True
+        stats.pis[settings.pi_host] = True
+        stats.pi_online = True
         archived = pi.list_archived(".wiglecsv")
         log.info("Backfilling sightings", host=settings.pi_host, files=len(archived))
         own_radios = pi.own_radios()
@@ -432,10 +433,14 @@ def seed_totals(settings: Settings, dry_run: bool = False) -> int:
     return 0
 
 
+# RunStats fields a span can't take as they are (span_attributes).
+NON_SCALAR_STATS = frozenset({"detections", "pis"})
+
+
 def span_attributes(stats: RunStats) -> dict:
     """The run's stats as span attributes: a span takes only plain values,
     so detections become one attribute per kind found."""
-    out = {f"sync.{k}": v for k, v in vars(stats).items() if k not in ("detections", "pis") and v is not None}
+    out = {f"sync.{k}": v for k, v in vars(stats).items() if k not in NON_SCALAR_STATS and v is not None}
     out.update({f"sync.detections.{k}": n for k, n in stats.detections.items()})
     return out
 

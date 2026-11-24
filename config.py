@@ -47,7 +47,7 @@ class Settings:
         return self.pi_hosts or (self.pi_host,)
 
     def for_host(self, host: str) -> Settings:
-        return replace(self, pi_host=host)
+        return replace(self, pi_host=host, pi_hosts=(host,))
 
     @classmethod
     def from_env(cls) -> Settings:

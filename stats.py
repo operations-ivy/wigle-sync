@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -187,21 +188,27 @@ def pi_hosts() -> tuple[str, ...]:
     return hosts or (os.environ.get("PI_HOST", ""),)
 
 
+def _pi_last_seen() -> dict[str, float]:
+    """When the sync last found each Pi, by host; empty without Prometheus
+    (the probes still answer)."""
+    try:
+        found = _prom(f"{PI_HOST_PREFIX}last_seen_timestamp_seconds")
+    except (requests.RequestException, ValueError, KeyError) as e:
+        log.warning("Can't read when each Pi was last seen", error=str(e))
+        return {}
+    return {r["metric"]["pi"]: float(r["value"][1]) for r in found if "pi" in r["metric"]}
+
+
 def pi() -> dict[str, Any]:
     """Each Pi home or away right now, and when the sync last found it.
     host and online_now are the first Pi and any Pi, for older pages."""
     port = int(os.environ.get("PI_PORT", "22"))
-    try:
-        seen = {
-            r["metric"].get("pi"): float(r["value"][1]) for r in _prom(f"{PI_HOST_PREFIX}last_seen_timestamp_seconds")
-        }
-    except Exception:
-        seen = {}  # the probes still answer without Prometheus
+    seen = _pi_last_seen()
     hosts = [
         {
             "host": host,
             "online_now": _cache.get(
-                f"pi:{host}", PI_PROBE_TTL_SECONDS, lambda h=host: pi_is_online(h, port, timeout=1.5)
+                f"pi:{host}", PI_PROBE_TTL_SECONDS, functools.partial(pi_is_online, host, port, timeout=1.5)
             ),
             "seen": seen.get(host),
         }

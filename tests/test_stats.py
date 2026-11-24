@@ -148,7 +148,7 @@ def test_the_pi_probes_answer_without_prometheus(monkeypatch):
     with (
         mock.patch.object(stats, "_cache", stats._Cache()),
         mock.patch.object(stats, "pi_is_online", return_value=False),
-        mock.patch.object(stats, "_prom", side_effect=ConnectionError("prometheus down")),
+        mock.patch.object(stats, "_prom", side_effect=stats.requests.ConnectionError("prometheus down")),
     ):
         got = stats.pi()
     assert got["hosts"] == [{"host": "brick69", "online_now": False, "seen": None}]

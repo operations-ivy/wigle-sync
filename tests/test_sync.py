@@ -5,6 +5,8 @@ import socket
 import sqlite3
 from unittest import mock
 
+import pytest
+
 from config import Settings
 from observability import RunStats
 from pi_client import RemoteFile
@@ -236,16 +238,27 @@ def test_every_pi_is_synced_and_one_failing_does_not_stop_the_next():
     assert (stats.failed, stats.pis, stats.pi_online) == (1, {"b": True}, True)
 
 
-def test_pi_hosts_falls_back_to_pi_host(monkeypatch):
+@pytest.mark.parametrize(
+    ("pi_hosts", "expected"),
+    [(None, ("brick69",)), ("", ("brick69",)), (" brick69, scootypuffsr ,", ("brick69", "scootypuffsr"))],
+)
+def test_pi_hosts_or_else_pi_host(monkeypatch, pi_hosts, expected):
     monkeypatch.setenv("WIGLE_API_NAME", "n")
     monkeypatch.setenv("WIGLE_API_TOKEN", "t")
     monkeypatch.setenv("PI_HOST", "brick69")
-    monkeypatch.delenv("PI_HOSTS", raising=False)
-    assert Settings.from_env().hosts == ("brick69",)
-    monkeypatch.setenv("PI_HOSTS", " brick69, scootypuffsr ,")
+    if pi_hosts is None:
+        monkeypatch.delenv("PI_HOSTS", raising=False)
+    else:
+        monkeypatch.setenv("PI_HOSTS", pi_hosts)
     s = Settings.from_env()
-    assert (s.hosts, s.pi_host, s.for_host("scootypuffsr").pi_host) == (
-        ("brick69", "scootypuffsr"),
-        "brick69",
-        "scootypuffsr",
-    )
+    assert s.hosts == expected
+    assert s.pi_host == "brick69"
+
+
+def test_each_pis_settings_are_its_own(monkeypatch):
+    monkeypatch.setenv("WIGLE_API_NAME", "n")
+    monkeypatch.setenv("WIGLE_API_TOKEN", "t")
+    monkeypatch.setenv("PI_HOSTS", "brick69,scootypuffsr")
+    one = Settings.from_env().for_host("scootypuffsr")
+    assert one.pi_host == "scootypuffsr"
+    assert one.hosts == ("scootypuffsr",)
