@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -16,6 +17,7 @@ import brick_observe
 import console_metrics
 import detect
 from observability import DETECTIONS
+from observability import PI_HOST_PREFIX
 from sync import pi_is_online
 from sync import REPORT_EVENT
 from wigle_client import WIGLE_API_URL
@@ -160,7 +162,8 @@ def schedule() -> dict[str, Any]:
 
 def last_run() -> dict[str, Any]:
     # Labelled series would collapse into one value by name: detections() reads those.
-    v = _prom_values(f'{{__name__=~"wigle_sync_.+", __name__!="{DETECTIONS}"}}')
+    # Each Pi's own gauges (PI_HOST_PREFIX) are read by pi().
+    v = _prom_values(f'{{__name__=~"wigle_sync_.+", __name__!="{DETECTIONS}", __name__!~"{PI_HOST_PREFIX}.+"}}')
     if not v:
         return {"error": "no wigle_sync metrics in Prometheus yet"}
     return {k.removeprefix("wigle_sync_"): val for k, val in v.items()}
@@ -179,11 +182,39 @@ def detections() -> dict[str, Any]:
     return {"kinds": found, "alerting": alerting}
 
 
+def pi_hosts() -> tuple[str, ...]:
+    """Every wardriving Pi (#88): PI_HOSTS, or PI_HOST alone."""
+    hosts = tuple(h.strip() for h in os.environ.get("PI_HOSTS", "").split(",") if h.strip())
+    return hosts or (os.environ.get("PI_HOST", ""),)
+
+
+def _pi_last_seen() -> dict[str, float]:
+    """When the sync last found each Pi, by host; empty without Prometheus
+    (the probes still answer)."""
+    try:
+        found = _prom(f"{PI_HOST_PREFIX}last_seen_timestamp_seconds")
+    except (requests.RequestException, ValueError, KeyError) as e:
+        log.warning("Can't read when each Pi was last seen", error=str(e))
+        return {}
+    return {r["metric"]["pi"]: float(r["value"][1]) for r in found if "pi" in r["metric"]}
+
+
 def pi() -> dict[str, Any]:
-    host = os.environ.get("PI_HOST", "")
+    """Each Pi home or away right now, and when the sync last found it.
+    host and online_now are the first Pi and any Pi, for older pages."""
     port = int(os.environ.get("PI_PORT", "22"))
-    online = _cache.get("pi", PI_PROBE_TTL_SECONDS, lambda: pi_is_online(host, port, timeout=1.5))
-    return {"host": host, "online_now": online}
+    seen = _pi_last_seen()
+    hosts = [
+        {
+            "host": host,
+            "online_now": _cache.get(
+                f"pi:{host}", PI_PROBE_TTL_SECONDS, functools.partial(pi_is_online, host, port, timeout=1.5)
+            ),
+            "seen": seen.get(host),
+        }
+        for host in pi_hosts()
+    ]
+    return {"host": hosts[0]["host"], "online_now": any(h["online_now"] for h in hosts), "hosts": hosts}
 
 
 def history() -> dict[str, Any]:

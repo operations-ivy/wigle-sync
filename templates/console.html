@@ -320,9 +320,13 @@ details.panel > summary:focus-visible{ outline:2px solid var(--cyan); outline-of
   function renderHud(d){
     var pi = d.pi, sch = d.schedule, lr = d.last_run, wg = d.wigle;
 
+    // Each Pi home or away (#88); seen: when the sync last found it.
     if (pi.error) link("link-pi", "pi", '<b class="warn">probe failed</b>');
-    else if (pi.online_now) link("link-pi", "pi", "<b>home</b>");
-    else link("link-pi", "pi", '<b class="idle">away</b>' + (lr.error ? "" : " · seen " + ago(lr.last_pi_online_timestamp_seconds)));
+    else link("link-pi", "pi", (pi.hosts || [pi]).map(function(h){
+      var seen = h.seen != null ? h.seen : (lr.error ? null : lr.last_pi_online_timestamp_seconds);
+      return esc(h.host || "") + " " + (h.online_now ? "<b>home</b>"
+        : '<b class="idle">away</b>' + (seen != null ? " · seen " + ago(seen) : ""));
+    }).join(" · "));
 
     link("link-wigle", "wigle.net", wg.error ? '<b class="warn">unreachable</b>' : "<b>linked</b> as " + esc(wg.user));
 

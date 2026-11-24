@@ -121,3 +121,34 @@ def test_after_action_keeps_each_files_newest_report_newest_drive_first():
         ("Kismet-b.wiglecsv", 5, 200),
         ("Kismet-a.wiglecsv", 2, 300),
     ]
+
+
+def test_every_pi_home_or_away_with_when_it_was_last_seen(monkeypatch):
+    monkeypatch.setenv("PI_HOSTS", "brick69,scootypuffsr")
+    seen = [{"metric": {"pi": "scootypuffsr"}, "value": [0, "1700000000"]}]
+    with (
+        mock.patch.object(stats, "_cache", stats._Cache()),
+        mock.patch.object(stats, "pi_is_online", side_effect=lambda host, port, timeout: host == "brick69"),
+        mock.patch.object(stats, "_prom", return_value=seen),
+    ):
+        got = stats.pi()
+    assert got == {
+        "host": "brick69",
+        "online_now": True,
+        "hosts": [
+            {"host": "brick69", "online_now": True, "seen": None},
+            {"host": "scootypuffsr", "online_now": False, "seen": 1700000000.0},
+        ],
+    }
+
+
+def test_the_pi_probes_answer_without_prometheus(monkeypatch):
+    monkeypatch.delenv("PI_HOSTS", raising=False)
+    monkeypatch.setenv("PI_HOST", "brick69")
+    with (
+        mock.patch.object(stats, "_cache", stats._Cache()),
+        mock.patch.object(stats, "pi_is_online", return_value=False),
+        mock.patch.object(stats, "_prom", side_effect=stats.requests.ConnectionError("prometheus down")),
+    ):
+        got = stats.pi()
+    assert got["hosts"] == [{"host": "brick69", "online_now": False, "seen": None}]

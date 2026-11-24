@@ -85,8 +85,11 @@ cp .env.template .env   # then fill in
 
 ### Pi side (one time)
 
-The Pi is `brick69` at 192.168.1.208 (static DHCP lease); Kismet logs to
-`/var/log/kismet`. It has two Wi-Fi radios, named by udev `.link` files that match
+The Pis are in `PI_HOSTS` (#88), synced in turn each run: `brick69` at
+192.168.1.208 (static DHCP lease) and the handheld `scootypuffsr` at
+192.168.1.230. Each Pi answers on its own in the console's HUD and in the
+`wigle_sync_pi_host_*` gauges (labelled `pi`); the run's other metrics are
+summed over every Pi. Kismet logs to `/var/log/kismet`. It has two Wi-Fi radios, named by udev `.link` files that match
 the USB chip rather than a MAC, so swapping a dongle keeps its name:
 
 | Name | Radio | Job |
@@ -216,6 +219,7 @@ whose only access is an ACL on that log dir. `pi/setup-pi-user.sh` sets this up
 ssh-keygen -t ed25519 -f ~/.ssh/wigle_sync_ed25519 -N "" -C wigle-sync
 ssh zaphod@brick69 "sudo bash -s -- '$(cat ~/.ssh/wigle_sync_ed25519.pub)'" < pi/setup-pi-user.sh
 ssh-keyscan -t ed25519 brick69 | sed "s/^brick69 /brick69,192.168.1.208 /" > known_hosts   # pins the Pi's host key, by name and address
+ssh-keyscan -t ed25519 scootypuffsr | sed "s/^scootypuffsr /scootypuffsr,192.168.1.230 /" >> known_hosts   # and each other Pi's
 ```
 
 WiGLE rejects uploads over 180 MiB, and Kismet can't rotate `.kismet` logs by
