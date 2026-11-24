@@ -26,12 +26,18 @@ TOTALS = {
     BYTES_TOTAL: "Bytes (post-compression) uploaded to WiGLE across every run",
 }
 
+# Each Pi's own gauges (push_pi), labelled pi="<host>" by their group.
+PI_HOST_PREFIX = "wigle_sync_pi_host_"
+
 log = brick_observe.get_logger(__name__)
 
 
 @dataclass
 class RunStats:
+    # Any Pi answered (the run's totals below are summed over every Pi).
     pi_online: bool = False
+    # Each Pi synced this run (#88): did it answer.
+    pis: dict[str, bool] = field(default_factory=dict)
     files_found: int = 0
     uploaded: int = 0
     archived_empty: int = 0
@@ -193,3 +199,22 @@ def push_metrics(stats: RunStats, finished_at: float, recount: Callable[[], dict
     except Exception:
         # Metrics are best-effort; never fail (or mask the result of) a sync over them.
         log.warning("Failed to push metrics", gateway=gateway, exc_info=True)
+    for host, online in stats.pis.items():
+        push_pi(gateway, host, online, finished_at)
+
+
+def push_pi(gateway: str, host: str, online: bool, finished_at: float) -> None:
+    """One Pi's own gauges (#88), in its own group ({pi="<host>"}), so a
+    Pi that's away keeps the last time it was seen."""
+    registry = CollectorRegistry()
+    Gauge(f"{PI_HOST_PREFIX}online", "Whether this Pi answered on the last run (1/0)", registry=registry).set(
+        int(online)
+    )
+    if online:
+        Gauge(f"{PI_HOST_PREFIX}last_seen_timestamp_seconds", "When this Pi was last reachable", registry=registry).set(
+            finished_at
+        )
+    try:
+        pushadd_to_gateway(gateway, job=SERVICE_NAME, grouping_key={"pi": host}, registry=registry, timeout=10)
+    except Exception:
+        log.warning("Failed to push the Pi's metrics", gateway=gateway, host=host, exc_info=True)

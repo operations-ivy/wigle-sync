@@ -41,8 +41,9 @@ spec:
                       key: WIGLE_API_TOKEN
                 - name: WIGLE_DONATE
                   value: "false"
-                - name: PI_HOST
-                  value: "brick69"
+                # Every wardriving Pi, synced in turn (#88).
+                - name: PI_HOSTS
+                  value: "brick69,scootypuffsr"
                 - name: PI_USER
                   value: "wigle-sync"
                 - name: PI_SSH_KEY_PATH

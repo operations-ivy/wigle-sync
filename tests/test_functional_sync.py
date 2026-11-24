@@ -142,8 +142,8 @@ def test_a_changed_host_key_is_refused(world, tmp_path):
     other = paramiko.RSAKey.generate(2048)
     (tmp_path / "known_hosts").write_text(f"[127.0.0.1]:{settings.pi_port} ssh-rsa {other.get_base64()}\n")
     stats = RunStats()
-    with pytest.raises(paramiko.SSHException):
-        sync.run(settings, stats)
+    sync.run(settings, stats)  # a failed Pi, logged; the next Pi would still be tried
+    assert stats.failed == 1 and not stats.succeeded
     assert wigle.uploads == [] and archived(kismet) == []
 
 
@@ -231,8 +231,15 @@ def test_pushed_metrics_read_as_prometheus_reads_them(world):
         server.shutdown()
         server.server_close()
 
-    [(path, body)] = pushes
+    [(path, body), (pi_path, pi_body)] = pushes
     assert path == "/metrics/job/wigle-sync"
+    # Each Pi's own group, which a run with that Pi away doesn't clear (#88).
+    assert pi_path == "/metrics/job/wigle-sync/pi/127.0.0.1"
+    pi_samples = {s.name: s.value for f in text_string_to_metric_families(pi_body.decode()) for s in f.samples}
+    assert pi_samples == {
+        "wigle_sync_pi_host_online": 1,
+        "wigle_sync_pi_host_last_seen_timestamp_seconds": 1000.0,
+    }
     samples = {s.name: s.value for f in text_string_to_metric_families(body.decode()) for s in f.samples}
     assert samples["wigle_sync_files_uploaded"] == 1
     assert samples["wigle_sync_files_uploaded_since_launch"] == 11

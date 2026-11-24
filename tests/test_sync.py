@@ -78,7 +78,7 @@ def test_wigle_unreachable_defers_the_rest_of_the_run():
         mock.patch("sync.sync_file", side_effect=[None, WigleUnreachable("no internet"), None]) as sync_file,
     ):
         pi_client.return_value.list_ready_files.return_value = files
-        run(mock.Mock(), stats)
+        run(_settings(), stats)
 
     assert sync_file.call_count == 2  # stopped at the first unreachable upload
     assert stats.deferred == 2
@@ -218,3 +218,34 @@ def test_sync_file_uploads_without_the_own_radios(tmp_path):
     remote = RemoteFile(csv.name, f"/r/{csv.name}", csv.stat().st_size, 0)
     sync_file(pi, wigle, remote, _settings(), stats, own_radios=frozenset({"b8:27:eb:00:00:01"}))
     assert uploaded == ["WigleWifi-1.4\nMAC,SSID\naa:bb:cc:dd:ee:ff,x\n"]
+
+
+def test_every_pi_is_synced_and_one_failing_does_not_stop_the_next():
+    stats = RunStats()
+    synced = []
+
+    def sync_pi(settings, stats, dry_run):
+        synced.append(settings.pi_host)
+        if settings.pi_host == "a":
+            raise OSError("no log dir")
+        stats.pis[settings.pi_host] = stats.pi_online = True
+
+    with mock.patch("sync.sync_pi", side_effect=sync_pi):
+        run(_settings(pi_hosts=("a", "b")), stats)
+    assert synced == ["a", "b"]
+    assert (stats.failed, stats.pis, stats.pi_online) == (1, {"b": True}, True)
+
+
+def test_pi_hosts_falls_back_to_pi_host(monkeypatch):
+    monkeypatch.setenv("WIGLE_API_NAME", "n")
+    monkeypatch.setenv("WIGLE_API_TOKEN", "t")
+    monkeypatch.setenv("PI_HOST", "brick69")
+    monkeypatch.delenv("PI_HOSTS", raising=False)
+    assert Settings.from_env().hosts == ("brick69",)
+    monkeypatch.setenv("PI_HOSTS", " brick69, scootypuffsr ,")
+    s = Settings.from_env()
+    assert (s.hosts, s.pi_host, s.for_host("scootypuffsr").pi_host) == (
+        ("brick69", "scootypuffsr"),
+        "brick69",
+        "scootypuffsr",
+    )

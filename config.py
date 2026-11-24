@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from dataclasses import replace
 
 from dotenv import load_dotenv
 
 
 def _bool(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _list(value: str) -> tuple[str, ...]:
+    """A comma-separated setting, blanks dropped."""
+    return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
 @dataclass(frozen=True)
@@ -32,6 +38,16 @@ class Settings:
     # from 57 of them in a row, and the .wiglecsv of the same session already
     # carries every network.
     upload_extensions: tuple[str, ...] = (".wiglecsv",)
+    # Every wardriving Pi a run syncs, in turn (#88): PI_HOSTS, or PI_HOST
+    # alone. pi_host is the one being synced; for_host gives each Pi's copy.
+    pi_hosts: tuple[str, ...] = ()
+
+    @property
+    def hosts(self) -> tuple[str, ...]:
+        return self.pi_hosts or (self.pi_host,)
+
+    def for_host(self, host: str) -> Settings:
+        return replace(self, pi_host=host)
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -40,11 +56,13 @@ class Settings:
         load_dotenv()
 
         remote_dir = os.environ.get("PI_REMOTE_DIR", "/var/log/kismet")
+        hosts = _list(os.environ.get("PI_HOSTS", "")) or (os.environ["PI_HOST"],)
         return cls(
             wigle_api_name=os.environ["WIGLE_API_NAME"],
             wigle_api_token=os.environ["WIGLE_API_TOKEN"],
             wigle_donate=_bool(os.environ.get("WIGLE_DONATE", "false")),
-            pi_host=os.environ["PI_HOST"],
+            pi_host=hosts[0],
+            pi_hosts=hosts,
             pi_port=int(os.environ.get("PI_PORT", "22")),
             pi_user=os.environ.get("PI_USER", "wigle-sync"),
             pi_ssh_key_path=os.path.expanduser(os.environ.get("PI_SSH_KEY_PATH", "~/.ssh/id_ed25519")),
@@ -54,11 +72,7 @@ class Settings:
             pi_connect_timeout=float(os.environ.get("PI_CONNECT_TIMEOUT", "10")),
             pi_probe_timeout=float(os.environ.get("PI_PROBE_TIMEOUT", "3")),
             min_file_age_seconds=int(os.environ.get("MIN_FILE_AGE_SECONDS", "300")),
-            file_extensions=tuple(
-                ext.strip() for ext in os.environ.get("FILE_EXTENSIONS", ".kismet,.wiglecsv").split(",") if ext.strip()
-            ),
+            file_extensions=_list(os.environ.get("FILE_EXTENSIONS", ".kismet,.wiglecsv")),
             compress=_bool(os.environ.get("COMPRESS_UPLOADS", "true")),
-            upload_extensions=tuple(
-                ext.strip() for ext in os.environ.get("UPLOAD_EXTENSIONS", ".wiglecsv").split(",") if ext.strip()
-            ),
+            upload_extensions=_list(os.environ.get("UPLOAD_EXTENSIONS", ".wiglecsv")),
         )

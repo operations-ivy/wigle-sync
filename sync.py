@@ -286,13 +286,29 @@ def sync_file(
 
 
 def run(settings: Settings, stats: RunStats, dry_run: bool = False) -> None:
+    """Sync every Pi in turn (#88), into one run's stats. One Pi failing
+    (its SSH, its log dir) is counted and logged, and the next is still
+    synced."""
+    for host in settings.hosts:
+        with tracer.start_as_current_span("pi.sync", attributes={"pi.host": host}):
+            try:
+                sync_pi(settings.for_host(host), stats, dry_run)
+            except Exception:
+                stats.failed += 1
+                log.exception("Failed to sync the Pi, trying the next", host=host)
+
+
+def sync_pi(settings: Settings, stats: RunStats, dry_run: bool = False) -> None:
+    """One Pi: settings.pi_host."""
+    host = settings.pi_host
+    stats.pis[host] = False
     # The Pi is out wardriving (or powered off) most of the time — that's the
     # normal case, not a failure. A bare TCP probe answers that in a few seconds
     # before any SSH handshake or WiGLE setup, and the job exits cleanly.
     with tracer.start_as_current_span("pi.probe"):
-        stats.pi_online = pi_is_online(settings.pi_host, settings.pi_port, settings.pi_probe_timeout)
-    if not stats.pi_online:
-        log.info("Pi offline, nothing to do", host=settings.pi_host)
+        online = pi_is_online(host, settings.pi_port, settings.pi_probe_timeout)
+    if not online:
+        log.info("Pi offline, nothing to do", host=host)
         return
 
     wigle = WigleClient(settings.wigle_api_name, settings.wigle_api_token, donate=settings.wigle_donate)
@@ -303,9 +319,10 @@ def run(settings: Settings, stats: RunStats, dry_run: bool = False) -> None:
             pi.connect()
     except OSError as e:
         # Answered the probe but dropped off before SSH finished (e.g. pulling out of the driveway).
-        stats.pi_online = False
-        log.info("Pi went away while connecting, nothing to do", host=settings.pi_host, error=str(e))
+        log.info("Pi went away while connecting, nothing to do", host=host, error=str(e))
         return
+    stats.pis[host] = True
+    stats.pi_online = True
 
     watch: follows.NullFollows = follows.NullFollows()
     with tracer.start_as_current_span("ledger.load"):
@@ -314,7 +331,7 @@ def run(settings: Settings, stats: RunStats, dry_run: bool = False) -> None:
         with tracer.start_as_current_span("pi.list"):
             ready = pi.list_ready_files()
         stats.files_found = len(ready)
-        log.info("Found files ready to upload", count=len(ready), files=[f.name for f in ready])
+        log.info("Found files ready to upload", host=host, count=len(ready), files=[f.name for f in ready])
         own_radios = pi.own_radios() if ready else frozenset()
         if ready and not dry_run:
             with tracer.start_as_current_span("follows.load"):
@@ -329,14 +346,16 @@ def run(settings: Settings, stats: RunStats, dry_run: bool = False) -> None:
             except WigleUnreachable as e:
                 # The home internet is down, not something wigle-sync got wrong. Every
                 # file is still on the Pi, so the next run picks them up; stop trying now.
-                stats.deferred = len(ready) - i
+                stats.deferred += len(ready) - i
                 log.info(
                     "WiGLE unreachable, leaving files on the Pi for next run", deferred=stats.deferred, error=str(e)
                 )
                 break
             except Exception:
                 stats.failed += 1
-                log.exception("Failed to sync file, leaving it on the Pi for next run", file=remote_file.name)
+                log.exception(
+                    "Failed to sync file, leaving it on the Pi for next run", host=host, file=remote_file.name
+                )
         with tracer.start_as_current_span("follows.check"):
             check_follows(pi, watch, own_radios, stats)
     finally:
@@ -346,19 +365,32 @@ def run(settings: Settings, stats: RunStats, dry_run: bool = False) -> None:
 
 
 def backfill_sightings(settings: Settings, stats: RunStats) -> int:
-    """Publish the sightings of every drive already archived on the Pi (the
+    """Publish the sightings of every drive already archived on each Pi (the
     history before #83), then run the follows-me check. Safe to repeat: a
     drive's records replace themselves."""
     watch = follows.open_follows(os.environ.get("KAFKA_BOOTSTRAP"))
     if not watch.available:
         log.error("Kafka unset or unreadable: nothing to backfill into")
         return 1
+    try:
+        for host in settings.hosts:
+            try:
+                backfill_pi(settings.for_host(host), watch, stats)
+            except OSError as e:
+                log.warning("Pi unreachable, not backfilled", host=host, error=str(e))
+    finally:
+        watch.close()
+    return 0
+
+
+def backfill_pi(settings: Settings, watch: follows.NullFollows, stats: RunStats) -> None:
+    """backfill_sightings for one Pi: settings.pi_host."""
     pi = PiClient(settings)
     try:
         pi.connect()
-        stats.pi_online = True
+        stats.pi_online = stats.pis[settings.pi_host] = True
         archived = pi.list_archived(".wiglecsv")
-        log.info("Backfilling sightings", files=len(archived))
+        log.info("Backfilling sightings", host=settings.pi_host, files=len(archived))
         own_radios = pi.own_radios()
         for remote_file in archived:
             with tempfile.TemporaryDirectory() as tmp:
@@ -367,10 +399,8 @@ def backfill_sightings(settings: Settings, stats: RunStats) -> int:
                     publish_sightings(watch, local_path, ledgers.file_key(local_path), stats)
         check_follows(pi, watch, own_radios, stats)
     finally:
-        watch.close()
         pi.close()
-    log.info("Backfill complete", files=len(archived), sightings=stats.sightings)
-    return 0
+    log.info("Backfill complete", host=settings.pi_host, files=len(archived), sightings=stats.sightings)
 
 
 def wigle_totals(settings: Settings) -> dict[str, float]:
@@ -405,7 +435,7 @@ def seed_totals(settings: Settings, dry_run: bool = False) -> int:
 def span_attributes(stats: RunStats) -> dict:
     """The run's stats as span attributes: a span takes only plain values,
     so detections become one attribute per kind found."""
-    out = {f"sync.{k}": v for k, v in vars(stats).items() if k != "detections" and v is not None}
+    out = {f"sync.{k}": v for k, v in vars(stats).items() if k not in ("detections", "pis") and v is not None}
     out.update({f"sync.detections.{k}": n for k, n in stats.detections.items()})
     return out
 
@@ -459,7 +489,7 @@ def main() -> int:
             span.set_status(Status(StatusCode.ERROR))
             job.fail(f"{stats.failed} failed")
         stats.duration_seconds = time.monotonic() - started
-        log.info("Sync complete", **{**vars(stats), "detections": dict(stats.detections)})
+        log.info("Sync complete", **{**vars(stats), "detections": dict(stats.detections), "pis": dict(stats.pis)})
         if not args.dry_run:
             push_metrics(stats, finished_at=time.time(), recount=lambda: wigle_totals(settings))
 
